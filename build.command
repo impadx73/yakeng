@@ -13,21 +13,41 @@ fi
 
 APP="Yakeng.app"
 DMG="Yakeng.dmg"
-rm -rf "$APP" "$DMG" dmg-root
+VERSION="2.0"
+rm -rf "$APP" "$DMG" dmg-root build.log
 
-echo "==> Đang biên dịch (Universal: Apple Silicon + Intel)..."
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-if swiftc -O -target arm64-apple-macos11 Sources/main.swift -o Yakeng-arm64 2>/dev/null \
-   && swiftc -O -target x86_64-apple-macos11 Sources/main.swift -o Yakeng-x86_64 2>/dev/null; then
+
+echo "==> Đang biên dịch Yakeng $VERSION ..."
+set -o pipefail
+build_arch() {
+  swiftc -O -target "$1-apple-macos12.0" -module-name Yakeng Sources/*.swift -o "$2" 2>&1
+}
+
+if build_arch arm64 Yakeng-arm64 | tee build.log && build_arch x86_64 Yakeng-x86_64 2>/dev/null; then
   lipo -create Yakeng-arm64 Yakeng-x86_64 -output "$APP/Contents/MacOS/Yakeng"
   rm -f Yakeng-arm64 Yakeng-x86_64
+  echo "   Universal (Apple Silicon + Intel)"
 else
-  echo "   (Không build được universal, dùng kiến trúc hiện tại)"
   rm -f Yakeng-arm64 Yakeng-x86_64
-  swiftc -O Sources/main.swift -o "$APP/Contents/MacOS/Yakeng"
+  if grep -q "error:" build.log; then
+    echo
+    echo "!!! LỖI BIÊN DỊCH – xem build.log"
+    grep -n "error:" build.log | head -30
+    read -n 1 -s -r -p "Nhấn phím bất kỳ để đóng..."
+    exit 1
+  fi
+  echo "   (Không build được universal, dùng kiến trúc hiện tại)"
+  swiftc -O -module-name Yakeng Sources/*.swift -o "$APP/Contents/MacOS/Yakeng" 2>&1 | tee build.log || true
+  if grep -q "error:" build.log; then
+    echo "!!! LỖI BIÊN DỊCH – xem build.log"
+    grep -n "error:" build.log | head -30
+    read -n 1 -s -r -p "Nhấn phím bất kỳ để đóng..."
+    exit 1
+  fi
 fi
 
-cat > "$APP/Contents/Info.plist" <<'EOF'
+cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -37,11 +57,12 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
   <key>CFBundleIdentifier</key><string>com.impadx.yakeng</string>
   <key>CFBundleExecutable</key><string>Yakeng</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleVersion</key><string>1.0</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSHumanReadableCopyright</key><string>github.com/impadx73/yakeng</string>
 </dict>
 </plist>
 EOF
@@ -52,7 +73,7 @@ echo "==> Đang tạo $DMG ..."
 mkdir -p dmg-root
 cp -R "$APP" dmg-root/
 ln -s /Applications dmg-root/Applications
-hdiutil create -volname "Yakeng" -srcfolder dmg-root -ov -format UDZO "$DMG" >/dev/null
+hdiutil create -volname "Yakeng" -srcfolder dmg-root -ov -format UDZO "$DMG" >/dev/null 2>&1
 rm -rf dmg-root
 
 echo

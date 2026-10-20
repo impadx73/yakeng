@@ -1,85 +1,121 @@
-// Yakeng: ánh xạ Ctrl+A / Ctrl+C / Ctrl+V -> Cmd+A / Cmd+C / Cmd+V trên macOS
-// Chạy nền, có icon nhỏ trên thanh menu để thoát.
-
+// Yakeng – bộ công cụ bàn phím kiểu Windows cho macOS
+// Ctrl→Cmd · Alt+Tab · Lịch sử clipboard & chụp màn hình · Gõ tiếng Việt
 import Cocoa
+import SwiftUI
 
-// Mã phím ảo (virtual keycode) trên bàn phím Mac: A = 0, C = 8, V = 9
-let targetKeys: Set<Int64> = [0, 8, 9]
-
-// Những app KHÔNG áp dụng (vì Ctrl+A/C trong terminal có ý nghĩa riêng)
-let excludedBundleIDs: Set<String> = [
-    "com.apple.Terminal",
-    "com.googlecode.iterm2",
-]
-
-var eventTap: CFMachPort?
-
-func isExcludedAppActive() -> Bool {
-    guard let id = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return false }
-    return excludedBundleIDs.contains(id)
-}
-
-func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
-    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-        if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
-        return Unmanaged.passUnretained(event)
-    }
-
-    let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-    var flags = event.flags
-
-    if targetKeys.contains(keyCode),
-       flags.contains(.maskControl),
-       !flags.contains(.maskCommand),
-       !isExcludedAppActive() {
-        flags.remove(.maskControl)
-        flags.insert(.maskCommand)
-        event.flags = flags
-    }
-    return Unmanaged.passUnretained(event)
-}
-
-func startTap() -> Bool {
-    let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
-    guard let tap = CGEvent.tapCreate(
-        tap: .cgSessionEventTap,
-        place: .headInsertEventTap,
-        options: .defaultTap,
-        eventsOfInterest: CGEventMask(mask),
-        callback: handleEvent,
-        userInfo: nil
-    ) else { return false }
-    eventTap = tap
-    let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-    CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
-    CGEvent.tapEnable(tap: tap, enable: true)
-    return true
-}
-
-class AppDelegate: NSObject, NSApplicationDelegate {
-    var statusItem: NSStatusItem!
-    var timer: Timer?
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: NSStatusItem!
+    private var settingsWindow: NSWindow?
+    private var permissionTimer: Timer?
+    private let tap = EventTap.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "⌃→⌘"
-        let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Yakeng: Ctrl+A/C/V → Cmd+A/C/V", action: nil, keyEquivalent: ""))
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Thoát", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
-        statusItem.menu = menu
+        setupStatusItem()
+        tap.onVietToggled = { [weak self] in self?.refreshStatusTitle() }
+        tap.clipboard.start()
 
-        // Yêu cầu quyền Accessibility (hiện hộp thoại hệ thống nếu chưa cấp)
+        // Quyền Accessibility
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        if AXIsProcessTrustedWithOptions(opts), startTap() { return }
-
-        // Chưa có quyền: chờ người dùng bật trong System Settings rồi tự khởi động
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] t in
-            if AXIsProcessTrusted(), startTap() {
-                t.invalidate()
-                self?.timer = nil
+        if AXIsProcessTrustedWithOptions(opts), tap.start() {
+            refreshStatusTitle()
+        } else {
+            refreshStatusTitle()
+            permissionTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] t in
+                guard let self = self else { return }
+                if AXIsProcessTrusted(), self.tap.start() {
+                    t.invalidate()
+                    self.permissionTimer = nil
+                    self.refreshStatusTitle()
+                }
+            }
+            if UserDefaults.standard.object(forKey: "yakeng.settings") == nil {
+                openSettings()   // lần đầu chạy: mở cài đặt để hướng dẫn cấp quyền
             }
         }
+    }
+
+    // MARK: - Thanh menu
+
+    private func setupStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.button?.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        let menu = NSMenu()
+        menu.delegate = self
+        statusItem.menu = menu
+    }
+
+    private func refreshStatusTitle() {
+        guard let b = statusItem.button else { return }
+        let cfg = Settings.shared.data
+        if !tap.isRunning {
+            b.title = "Y!"
+            b.toolTip = "Yakeng: chưa có quyền Accessibility"
+        } else if cfg.vietEnabled {
+            b.title = cfg.vietActive ? "VI" : "EN"
+            b.toolTip = "Yakeng – gõ tiếng Việt: \(cfg.vietActive ? "bật" : "tắt")"
+        } else {
+            b.title = "Y"
+            b.toolTip = "Yakeng"
+        }
+    }
+
+    @objc private func toggleViet() {
+        Settings.shared.data.vietActive.toggle()
+        tap.viet.reset()
+        refreshStatusTitle()
+    }
+
+    @objc private func showClipboard() { tap.clipboard.togglePanel() }
+
+    @objc func openSettings() {
+        if settingsWindow == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 460),
+                             styleMask: [.titled, .closable, .miniaturizable],
+                             backing: .buffered, defer: false)
+            w.title = "Yakeng – Cài đặt"
+            w.contentView = NSHostingView(rootView: SettingsView())
+            w.isReleasedWhenClosed = false
+            w.center()
+            settingsWindow = w
+        }
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func quit() { NSApp.terminate(nil) }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let cfg = Settings.shared.data
+
+        let head = NSMenuItem(title: tap.isRunning ? "Yakeng đang chạy" : "Yakeng: chưa có quyền Accessibility", action: nil, keyEquivalent: "")
+        head.isEnabled = false
+        menu.addItem(head)
+        menu.addItem(.separator())
+
+        if cfg.vietEnabled {
+            let v = NSMenuItem(title: "Gõ tiếng Việt (\(cfg.vietToggleHotkey.display))", action: #selector(toggleViet), keyEquivalent: "")
+            v.state = cfg.vietActive ? .on : .off
+            v.target = self
+            menu.addItem(v)
+        }
+        if cfg.clipboardEnabled {
+            let c = NSMenuItem(title: "Lịch sử clipboard… (\(cfg.clipboardHotkey.display))", action: #selector(showClipboard), keyEquivalent: "")
+            c.target = self
+            menu.addItem(c)
+        }
+        menu.addItem(.separator())
+        let s = NSMenuItem(title: "Cài đặt…", action: #selector(openSettings), keyEquivalent: ",")
+        s.target = self
+        menu.addItem(s)
+        menu.addItem(.separator())
+        let q = NSMenuItem(title: "Thoát Yakeng", action: #selector(quit), keyEquivalent: "q")
+        q.target = self
+        menu.addItem(q)
+
+        refreshStatusTitle()
     }
 }
 

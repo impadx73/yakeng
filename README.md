@@ -1,42 +1,50 @@
 # Yakeng
 
-Ứng dụng macOS nhỏ chạy nền, ánh xạ phím tắt kiểu Windows sang macOS:
+Bộ công cụ bàn phím "kiểu Windows" cho macOS, chạy nền trên thanh menu. Mọi phím tắt đều đổi được trong **Cài đặt**.
 
-| Bấm | Hiểu thành |
-|---|---|
-| Ctrl + A | Cmd + A (chọn tất cả) |
-| Ctrl + C | Cmd + C (sao chép) |
-| Ctrl + V | Cmd + V (dán) |
-
-Hoạt động ở mọi app, trừ Terminal và iTerm2 (vì Ctrl+A/C trong shell có ý nghĩa riêng).
+| Tính năng | Mặc định | Mô tả |
+|---|---|---|
+| **Ctrl → Cmd** | Ctrl+A / C / V | Bấm Ctrl+phím được hiểu như Cmd+phím. Chọn thêm X, Z, S, F, N, T… trong Cài đặt. Loại trừ Terminal/iTerm. |
+| **Alt + Tab** | ⌥⇥ (⇧ để lùi) | Bảng chuyển *từng cửa sổ* như Windows (⌘⇥ của macOS chỉ chuyển app). Thả ⌥ để chọn, Esc huỷ. |
+| **Lịch sử clipboard** | ⇧⌘S | Bảng mọi thứ đã sao chép (chữ + ảnh). Bấm mục để dán. Nút **Chụp màn hình** kéo chọn vùng như Win+Shift+S. |
+| **Gõ tiếng Việt** | ⌥Z bật/tắt | Telex hoặc VNI, kiểu dấu cũ/mới. Thanh menu hiện **VI / EN**. |
 
 ## Build
 
-Cần Xcode Command Line Tools (`xcode-select --install`).
+Cần Xcode Command Line Tools (`xcode-select --install`), macOS 12+.
 
 ```bash
 ./build.command
 ```
 
-Script tạo ra:
-
-- `Yakeng.app` — app chạy nền, icon **⌃→⌘** trên thanh menu, bấm để thoát
-- `Yakeng.dmg` — file cài đặt (mở, kéo Yakeng vào Applications), universal (Apple Silicon + Intel)
+Tạo ra `Yakeng.app` và `Yakeng.dmg` (universal nếu có SDK Intel, nếu không thì theo máy hiện tại).
 
 ## Cài đặt & cấp quyền
 
 1. Mở `Yakeng.dmg`, kéo **Yakeng** vào **Applications**.
 2. Lần đầu mở: nhấp chuột phải vào app → **Open** (app ký ad-hoc, chưa notarize).
-3. Khi macOS hỏi quyền **Accessibility**, bật cho Yakeng trong *System Settings → Privacy & Security → Accessibility*. App tự bắt đầu hoạt động ngay sau khi được cấp quyền.
-4. Muốn chạy khi đăng nhập: thêm vào *System Settings → General → Login Items*.
+3. Cấp quyền **Accessibility** khi macOS hỏi (*System Settings → Privacy & Security → Accessibility*). Mọi tính năng phím tắt cần quyền này.
+4. Lần đầu bấm "Chụp màn hình", macOS hỏi thêm quyền **Screen Recording**.
+5. Bật "Tự chạy khi đăng nhập" trong Cài đặt (macOS 13+).
 
-## Tuỳ chỉnh
+## Mã nguồn
 
-Trong `Sources/main.swift`:
+```
+Sources/
+├── main.swift            AppDelegate, icon thanh menu, cửa sổ Cài đặt
+├── Settings.swift        Cấu hình (UserDefaults, JSON)
+├── Hotkey.swift          Mô hình phím tắt + tên phím
+├── EventTap.swift        CGEvent tap duy nhất, phân phối sự kiện, gửi phím giả lập
+├── VietInput.swift       Bộ gõ tiếng Việt (Telex/VNI) – Composer ghép dấu
+├── WindowSwitcher.swift  Alt+Tab: danh sách cửa sổ (CGWindowList) + kích hoạt (AX)
+├── ClipboardManager.swift Theo dõi NSPasteboard, bảng lịch sử, screencapture
+└── SettingsView.swift    Giao diện Cài đặt (SwiftUI) + HotkeyRecorder
+```
 
-- `targetKeys` — thêm keycode phím khác (X = 7, Z = 6, S = 1, …)
-- `excludedBundleIDs` — các app không áp dụng
+### Cách hoạt động
 
-## Cách hoạt động
-
-Dùng `CGEvent` tap ở mức hệ thống: khi gặp phím A/C/V kèm Ctrl (không kèm Cmd), app đổi cờ Ctrl thành Cmd rồi chuyển tiếp sự kiện, nên ứng dụng nhận được hiểu như Cmd+A/C/V.
+- **Event tap** (`CGEvent.tapCreate`) nhận mọi phím ở mức hệ thống. Sự kiện do Yakeng tự gửi được đánh dấu bằng `eventSourceUserData` để không xử lý lặp.
+- **Ctrl→Cmd**: đổi cờ `.maskControl` → `.maskCommand` rồi chuyển tiếp.
+- **Gõ tiếng Việt**: lưu các phím của từ đang gõ, ghép lại bằng `Composer`, so sánh với chuỗi đang hiển thị, gửi backspace + ký tự mới cho phần khác biệt.
+- **Alt+Tab**: lấy danh sách cửa sổ bằng `CGWindowListCopyWindowInfo`, kích hoạt bằng Accessibility API (`_AXUIElementGetWindow` để khớp window ID).
+- **Clipboard**: kiểm tra `NSPasteboard.changeCount` mỗi 0,5s; chụp màn hình gọi `screencapture -i -c`.
