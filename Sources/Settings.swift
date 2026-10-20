@@ -29,6 +29,8 @@ final class Settings: ObservableObject {
         var vietToggleHotkey = Hotkey(keyCode: 6, modifiers: .option)       // ⌥Z
         var vietActive = true
         var vietModernTone = false                               // hoà (true) / hòa (false)
+        var vietSpellCheck = true                                // kiểm tra chính tả: từ lạ giữ nguyên
+        var vietBrowserFix = true                                // sửa lỗi gợi ý thanh địa chỉ trình duyệt
 
         var launchAtLogin = false
     }

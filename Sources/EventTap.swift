@@ -7,6 +7,9 @@ final class EventTap {
     /// Đánh dấu các sự kiện do chính Yakeng tạo ra, để không xử lý lại.
     static let magic: Int64 = 0x59414B45   // "YAKE"
 
+    /// Event source riêng cho phím giả lập (cách OpenKey dùng): nhận ra sự kiện của mình qua sourceStateID.
+    static let source = CGEventSource(stateID: .privateState)
+
     private var tap: CFMachPort?
     private let settings = Settings.shared
 
@@ -59,6 +62,9 @@ final class EventTap {
             return Unmanaged.passUnretained(event)
         }
         if event.getIntegerValueField(.eventSourceUserData) == EventTap.magic {
+            return Unmanaged.passUnretained(event)
+        }
+        if let src = EventTap.source, event.getIntegerValueField(.eventSourceStateID) == Int64(src.sourceStateID.rawValue) {
             return Unmanaged.passUnretained(event)
         }
         if suspended { return Unmanaged.passUnretained(event) }
@@ -131,6 +137,8 @@ final class EventTap {
             if cfg.vietEnabled, cfg.vietActive {
                 viet.method = cfg.vietMethod
                 viet.modernTone = cfg.vietModernTone
+                viet.browserFix = cfg.vietBrowserFix
+                viet.spellCheck = cfg.vietSpellCheck
                 if viet.handle(keyCode: keyCode, flags: flags, event: event) {
                     return nil
                 }
@@ -162,31 +170,36 @@ final class EventTap {
     }
 
     static func sendKey(_ keyCode: CGKeyCode, flags: CGEventFlags = []) {
-        let down = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true)
-        let up = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: false)
-        down?.flags = flags
-        up?.flags = flags
+        let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
+        let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
+        down?.flags = flags.union(.maskNonCoalesced)
+        up?.flags = flags.union(.maskNonCoalesced)
         post(down)
         post(up)
     }
 
     static func sendBackspace() { sendKey(51) }
 
+    /// Gửi từng ký tự một (mỗi sự kiện một ký tự, như OpenKey/Unikey).
     static func sendText(_ s: String) {
-        // Mỗi sự kiện chứa tối đa 20 đơn vị UTF-16
-        var units = Array(s.utf16)
-        while !units.isEmpty {
-            var chunk = Array(units.prefix(20))
-            units.removeFirst(chunk.count)
-            let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)
-            let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
-            down?.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: &chunk)
-            up?.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: &chunk)
-            down?.flags = []
-            up?.flags = []
-            post(down)
-            post(up)
-        }
+        for ch in s { sendCharacter(ch) }
+    }
+
+    static func sendCharacter(_ ch: Character) {
+        var units = Array(String(ch).utf16)
+        let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true)
+        let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
+        down?.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
+        up?.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
+        down?.flags = .maskNonCoalesced
+        up?.flags = .maskNonCoalesced
+        post(down)
+        post(up)
+    }
+
+    /// Bundle ID của app đang ở trước.
+    static var frontmostBundleID: String {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
     }
 }
 

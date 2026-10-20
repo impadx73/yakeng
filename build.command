@@ -13,40 +13,22 @@ fi
 
 APP="Yakeng.app"
 DMG="Yakeng.dmg"
-VERSION="2.1"
+VERSION="2.3"
 pkill -x Yakeng 2>/dev/null || true
 sleep 0.5
 rm -rf "$APP" "$DMG" dmg-root build.log
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-echo "==> Đang biên dịch Yakeng $VERSION ..."
+echo "==> Đang biên dịch Yakeng $VERSION (Apple Silicon) ..."
 set -o pipefail
-build_arch() {
-  swiftc -O -target "$1-apple-macos12.0" -module-name Yakeng Sources/*.swift -o "$2" 2>&1
-}
-
-if build_arch arm64 Yakeng-arm64 | tee build.log && build_arch x86_64 Yakeng-x86_64 2>/dev/null; then
-  lipo -create Yakeng-arm64 Yakeng-x86_64 -output "$APP/Contents/MacOS/Yakeng"
-  rm -f Yakeng-arm64 Yakeng-x86_64
-  echo "   Universal (Apple Silicon + Intel)"
-else
-  rm -f Yakeng-arm64 Yakeng-x86_64
-  if grep -q "error:" build.log; then
-    echo
-    echo "!!! LỖI BIÊN DỊCH – xem build.log"
-    grep -n "error:" build.log | head -30
-    read -n 1 -s -r -p "Nhấn phím bất kỳ để đóng..."
-    exit 1
-  fi
-  echo "   (Không build được universal, dùng kiến trúc hiện tại)"
-  swiftc -O -module-name Yakeng Sources/*.swift -o "$APP/Contents/MacOS/Yakeng" 2>&1 | tee build.log || true
-  if grep -q "error:" build.log; then
-    echo "!!! LỖI BIÊN DỊCH – xem build.log"
-    grep -n "error:" build.log | head -30
-    read -n 1 -s -r -p "Nhấn phím bất kỳ để đóng..."
-    exit 1
-  fi
+if ! swiftc -O -target arm64-apple-macos12.0 -module-name Yakeng Sources/*.swift \
+     -o "$APP/Contents/MacOS/Yakeng" 2>&1 | tee build.log; then
+  echo
+  echo "!!! LỖI BIÊN DỊCH – xem build.log"
+  grep -n "error:" build.log | head -30
+  read -n 1 -s -r -p "Nhấn phím bất kỳ để đóng..."
+  exit 1
 fi
 
 cat > "$APP/Contents/Info.plist" <<EOF

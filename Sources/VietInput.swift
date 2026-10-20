@@ -5,6 +5,14 @@ import Cocoa
 final class VietInput {
     var method = "telex"          // "telex" | "vni"
     var modernTone = false        // true: hoà, thuý; false: hòa, thúy
+    var spellCheck = true         // từ không phải âm tiết tiếng Việt hợp lệ thì giữ nguyên (files → files)
+    var browserFix = true         // gửi ký tự rỗng trước khi xoá để tránh gợi ý thanh địa chỉ nuốt backspace
+
+    static let browserBundleIDs: Set<String> = [
+        "com.google.Chrome", "com.google.Chrome.canary", "com.apple.Safari", "com.brave.Browser",
+        "com.microsoft.edgemac", "com.coccoc.Coccoc", "org.mozilla.firefox", "com.operasoftware.Opera",
+        "company.thebrowser.Browser", "com.vivaldi.Vivaldi", "com.apple.Spotlight",
+    ]
 
     private var raw: [Character] = []     // các phím đã gõ của từ hiện tại
     private var displayed = ""            // chuỗi đang hiển thị trên màn hình cho từ này
@@ -47,7 +55,7 @@ final class VietInput {
         }
 
         let candidate = raw + [ch]
-        let new = Composer.compose(candidate, method: method, modernTone: modernTone)
+        let new = Composer.compose(candidate, method: method, modernTone: modernTone, spellCheck: spellCheck)
         raw = candidate
         if new == displayed + String(ch) {
             // Không có gì thay đổi: để phím đi qua bình thường
@@ -64,7 +72,13 @@ final class VietInput {
         let nw = Array(new)
         var common = 0
         while common < old.count, common < nw.count, old[common] == nw[common] { common += 1 }
-        let del = old.count - common
+        var del = old.count - common
+        if del > 0, browserFix, VietInput.browserBundleIDs.contains(EventTap.frontmostBundleID) {
+            // Cách của OpenKey: chèn một ký tự rỗng rồi xoá thêm 1, để gợi ý tự động của
+            // thanh địa chỉ (đang được bôi đen) không làm lệch số backspace.
+            EventTap.sendCharacter("\u{202F}")
+            del += 1
+        }
         for _ in 0..<del { EventTap.sendBackspace() }
         let add = String(nw[common...])
         if !add.isEmpty { EventTap.sendText(add) }
@@ -124,7 +138,7 @@ enum Composer {
         return t
     }()
 
-    static func compose(_ raw: [Character], method: String, modernTone: Bool) -> String {
+    static func compose(_ raw: [Character], method: String, modernTone: Bool, spellCheck: Bool = true) -> String {
         var chars: [VChar] = []
         var tone = 0
 
@@ -165,7 +179,54 @@ enum Composer {
                 chars.append(VChar(base: lower, mod: 0, upper: upper))
             }
         }
+        if spellCheck, !isValidSyllable(chars, tone: tone) {
+            return String(raw)
+        }
         return render(chars, tone: tone, modernTone: modernTone)
+    }
+
+    // MARK: Kiểm tra chính tả
+
+    private static let initials: Set<String> = ["", "b", "c", "ch", "d", "đ", "g", "gh", "gi", "h", "k", "kh", "l", "m", "n", "ng", "ngh", "nh", "p", "ph", "qu", "r", "s", "t", "th", "tr", "v", "x"]
+    private static let finals: Set<String> = ["", "c", "ch", "m", "n", "ng", "nh", "p", "t"]
+    private static let stopFinals: Set<String> = ["c", "ch", "p", "t"]
+    private static let clusters: Set<String> = [
+        "a", "ă", "â", "e", "ê", "i", "o", "ô", "ơ", "u", "ư", "y",
+        "ai", "ao", "au", "ay", "âu", "ây", "eo", "êu", "ia", "iê", "iu", "oa", "oă", "oe", "oi", "ôi", "ơi", "oo",
+        "ua", "uâ", "uê", "ui", "uô", "uơ", "uy", "ưa", "ưi", "ươ", "ưu", "ya", "yê", "uă",
+        "iêu", "oai", "oay", "oeo", "uây", "uôi", "uya", "uyê", "uyu", "ươi", "ươu", "yêu", "uao",
+    ]
+    private static let vietLetters = Set("aăâeêioôơuưyđbcdfghjklmnpqrstvwxz")
+    private static let vietVowels = Set("aăâeêioôơuưy")
+
+    /// Chữ cái (không dấu thanh) của một VChar: a→â/ă, d→đ…
+    private static func letter(_ c: VChar) -> Character {
+        if vowels.contains(c.base) {
+            if let forms = toneTable["\(c.base)\(c.mod)"] { return forms[0] }
+            return c.base
+        }
+        return (c.base == "d" && c.mod == 1) ? "đ" : c.base
+    }
+
+    /// Âm tiết hợp lệ: phụ âm đầu + cụm nguyên âm + phụ âm cuối đều nằm trong bảng.
+    static func isValidSyllable(_ chars: [VChar], tone: Int) -> Bool {
+        if chars.isEmpty { return true }
+        let letters = chars.map(letter)
+        if letters.contains(where: { !vietLetters.contains($0) }) { return false }
+        var i = 0
+        while i < letters.count, !vietVowels.contains(letters[i]) { i += 1 }
+        var initial = String(letters[0..<i])
+        var j = i
+        while j < letters.count, vietVowels.contains(letters[j]) { j += 1 }
+        var cluster = Array(letters[i..<j])
+        let final = String(letters[j...])
+        if initial == "q", cluster.first == "u" { initial = "qu"; cluster.removeFirst() }
+        else if initial == "g", cluster.count > 1, cluster.first == "i" { initial = "gi"; cluster.removeFirst() }
+        guard initials.contains(initial), finals.contains(final) else { return false }
+        if cluster.isEmpty { return initial == "gi" || initial == "qu" }
+        guard clusters.contains(String(cluster)) else { return false }
+        if stopFinals.contains(final), [2, 3, 4].contains(tone) { return false }
+        return true
     }
 
     // MARK: Bảng phím
