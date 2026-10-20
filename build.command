@@ -14,24 +14,27 @@ fi
 APP="Yakeng.app"
 DMG="Yakeng.dmg"
 VERSION="2.6"
+OUT="$PWD"
 pkill -x Yakeng 2>/dev/null || true
 sleep 0.5
-rm -rf "$APP" "$DMG" dmg-root build.log
+rm -rf "$OUT/$APP" "$OUT/$DMG" "$OUT/dmg-root" "$OUT/build.log"
 
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+# Build và ký trong thư mục tạm: Desktop/iCloud hay gắn thuộc tính Finder khiến codesign từ chối
+WORK="$(mktemp -d /tmp/yakeng-build.XXXXXX)"
+mkdir -p "$WORK/$APP/Contents/MacOS" "$WORK/$APP/Contents/Resources"
 
 echo "==> Đang biên dịch Yakeng $VERSION (Apple Silicon) ..."
 set -o pipefail
 if ! swiftc -O -target arm64-apple-macos12.0 -module-name Yakeng Sources/*.swift \
-     -o "$APP/Contents/MacOS/Yakeng" 2>&1 | tee build.log; then
+     -o "$WORK/$APP/Contents/MacOS/Yakeng" 2>&1 | tee "$OUT/build.log"; then
   echo
   echo "!!! LỖI BIÊN DỊCH – xem build.log"
-  grep -n "error:" build.log | head -30
+  grep -n "error:" "$OUT/build.log" | head -30
   read -n 1 -s -r -p "Nhấn phím bất kỳ để đóng..."
   exit 1
 fi
 
-cat > "$APP/Contents/Info.plist" <<EOF
+cat > "$WORK/$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -49,26 +52,29 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>NSHumanReadableCopyright</key><string>github.com/impadx73/yakeng</string>
 </dict>
 </plist>
-EOF
+PLIST
 
-xattr -cr "$APP" 2>/dev/null || true     # bỏ thuộc tính Finder/quarantine, nếu không codesign sẽ từ chối
-codesign --force --deep --sign - "$APP"
+xattr -cr "$WORK/$APP" 2>/dev/null || true
+codesign --force --sign - "$WORK/$APP"
 
 echo "==> Đang tạo $DMG ..."
-mkdir -p dmg-root
-cp -R "$APP" dmg-root/
-ln -s /Applications dmg-root/Applications
-hdiutil create -volname "Yakeng" -srcfolder dmg-root -ov -format UDZO "$DMG" >/dev/null 2>&1
-rm -rf dmg-root
+mkdir -p "$WORK/dmg-root"
+cp -R "$WORK/$APP" "$WORK/dmg-root/"
+ln -s /Applications "$WORK/dmg-root/Applications"
+hdiutil create -volname "Yakeng" -srcfolder "$WORK/dmg-root" -ov -format UDZO "$WORK/$DMG" >/dev/null 2>&1
+
+ditto "$WORK/$APP" "$OUT/$APP"
+cp "$WORK/$DMG" "$OUT/$DMG"
+rm -rf "$WORK"
 
 echo
 echo "Xong!"
-echo "  App: $PWD/$APP"
-echo "  DMG: $PWD/$DMG"
+echo "  App: $OUT/$APP"
+echo "  DMG: $OUT/$DMG"
 echo
 echo "Cài trên máy khác: mở Yakeng.dmg, kéo Yakeng vào Applications,"
 echo "lần đầu nhấp chuột phải vào app -> Open, rồi bật quyền Accessibility khi được hỏi."
-open "$APP"
-open -R "$DMG"
+open "$OUT/$APP"
+open -R "$OUT/$DMG"
 echo
 read -n 1 -s -r -p "Nhấn phím bất kỳ để đóng cửa sổ này..."
