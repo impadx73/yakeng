@@ -13,7 +13,7 @@ fi
 
 APP="Yakeng.app"
 DMG="Yakeng.dmg"
-VERSION="2.7"
+VERSION="2.8"
 OUT="$PWD"
 pkill -x Yakeng 2>/dev/null || true
 sleep 0.5
@@ -55,7 +55,46 @@ cat > "$WORK/$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 xattr -cr "$WORK/$APP" 2>/dev/null || true
-codesign --force --sign - "$WORK/$APP"
+
+# --- Chứng chỉ tự ký "Yakeng Dev": tạo một lần, lưu trong Keychain đăng nhập.
+# Ký bằng chứng chỉ cố định thì chữ ký không đổi giữa các lần build,
+# nên quyền Accessibility/Screen Recording đã cấp được giữ nguyên.
+IDENTITY="Yakeng Dev"
+KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+if ! security find-identity -p codesigning "$KEYCHAIN" 2>/dev/null | grep -q "\"$IDENTITY\""; then
+  echo "==> Tạo chứng chỉ tự ký '$IDENTITY' (chỉ lần đầu)..."
+  CERTDIR="$(mktemp -d /tmp/yakeng-cert.XXXXXX)"
+  cat > "$CERTDIR/cert.cnf" <<CNF
+[req]
+distinguished_name = dn
+x509_extensions = v3
+prompt = no
+[dn]
+CN = $IDENTITY
+[v3]
+keyUsage = critical, digitalSignature
+extendedKeyUsage = critical, codeSigning
+basicConstraints = critical, CA:false
+subjectKeyIdentifier = hash
+CNF
+  openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -config "$CERTDIR/cert.cnf" \
+    -keyout "$CERTDIR/key.pem" -out "$CERTDIR/cert.pem" >/dev/null 2>&1
+  openssl pkcs12 -export -inkey "$CERTDIR/key.pem" -in "$CERTDIR/cert.pem" \
+    -out "$CERTDIR/yakeng.p12" -passout pass:yakeng -name "$IDENTITY" >/dev/null 2>&1
+  security import "$CERTDIR/yakeng.p12" -k "$KEYCHAIN" -P yakeng \
+    -T /usr/bin/codesign -T /usr/bin/security >/dev/null
+  echo "   macOS có thể hỏi mật khẩu đăng nhập để tin cậy chứng chỉ – hãy nhập và bấm Luôn cho phép."
+  security add-trusted-cert -r trustRoot -p codeSign -k "$KEYCHAIN" "$CERTDIR/cert.pem" || true
+  rm -rf "$CERTDIR"
+fi
+
+if security find-identity -p codesigning "$KEYCHAIN" 2>/dev/null | grep -q "\"$IDENTITY\"" \
+   && codesign --force --sign "$IDENTITY" --identifier com.impadx.yakeng "$WORK/$APP" 2>/dev/null; then
+  echo "   Đã ký bằng chứng chỉ '$IDENTITY'."
+else
+  echo "   (Không dùng được chứng chỉ, ký ad-hoc – mỗi lần build sẽ phải cấp lại quyền Accessibility)"
+  codesign --force --sign - "$WORK/$APP"
+fi
 
 echo "==> Đang tạo $DMG ..."
 mkdir -p "$WORK/dmg-root"
