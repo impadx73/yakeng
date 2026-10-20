@@ -75,9 +75,12 @@ final class VietInput {
         var common = 0
         while common < old.count, common < nw.count, old[common] == nw[common] { common += 1 }
         var del = old.count - common
-        if del > 0, browserFix, VietInput.browserBundleIDs.contains(EventTap.frontmostBundleID) {
+        if del > 0, browserFix, VietInput.browserBundleIDs.contains(EventTap.frontmostBundleID),
+           VietInput.isBrowserChromeFocused() {
             // Cách của OpenKey: chèn một ký tự rỗng rồi xoá thêm 1, để gợi ý tự động của
             // thanh địa chỉ (đang được bôi đen) không làm lệch số backspace.
+            // Chỉ áp dụng khi con trỏ ở thanh địa chỉ/giao diện trình duyệt, KHÔNG áp dụng trong
+            // trang web: nhiều trình soạn thảo web bỏ ký tự rỗng, khiến lần xoá dư ăn mất dấu cách.
             EventTap.sendCharacter("\u{202F}")
             del += 1
         }
@@ -85,6 +88,30 @@ final class VietInput {
         let add = String(nw[common...])
         if !add.isEmpty { EventTap.sendText(add) }
         displayed = new
+    }
+
+    /// Con trỏ có đang ở phần giao diện của trình duyệt (thanh địa chỉ…) chứ không phải trong trang web?
+    /// Đi ngược cây Accessibility từ phần tử đang focus: gặp AXWebArea nghĩa là đang ở trong trang.
+    static func isBrowserChromeFocused() -> Bool {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+        if app.bundleIdentifier == "com.apple.Spotlight" { return true }
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedUIElementAttribute as CFString, &value) == .success,
+              let focused = value else { return false }
+        var element = focused as! AXUIElement
+        for _ in 0..<30 {
+            var roleValue: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue) == .success,
+               let role = roleValue as? String, role == "AXWebArea" {
+                return false
+            }
+            var parentValue: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parentValue) == .success,
+                  let parent = parentValue else { break }
+            element = parent as! AXUIElement
+        }
+        return true
     }
 
     static func character(of event: CGEvent) -> Character? {

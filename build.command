@@ -13,7 +13,7 @@ fi
 
 APP="Yakeng.app"
 DMG="Yakeng.dmg"
-VERSION="2.5"
+VERSION="2.6"
 pkill -x Yakeng 2>/dev/null || true
 sleep 0.5
 rm -rf "$APP" "$DMG" dmg-root build.log
