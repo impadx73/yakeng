@@ -28,6 +28,11 @@ final class WindowSwitcher {
     private var panel: NSPanel?
     private let model = SwitcherModel()
 
+    /// Danh sách cửa sổ theo thứ tự dùng gần nhất (MRU), giống AltTab của lwouis:
+    /// macOS không cập nhật z-order kịp khi chuyển cửa sổ trong cùng một app, nên tự theo dõi.
+    private var mru: [CGWindowID] = []
+    private var mruTimer: Timer?
+
     init() {
         model.onSelect = { [weak self] i in
             guard let self = self else { return }
@@ -35,13 +40,55 @@ final class WindowSwitcher {
             self.commit()
         }
         model.onHover = { [weak self] i in self?.model.index = i }
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.noteFocusedWindow(after: 0.15)
+        }
+        mruTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.noteFocusedWindow(after: 0)
+        }
+    }
+
+    /// Ghi nhận cửa sổ đang có focus của app phía trước vào đầu danh sách MRU.
+    func noteFocusedWindow(after delay: TimeInterval) {
+        let work = { [weak self] in
+            guard let self = self, !self.isVisible,
+                  let app = NSWorkspace.shared.frontmostApplication,
+                  app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+            let axApp = AXUIElementCreateApplication(app.processIdentifier)
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &value) == .success,
+                  let win = value else { return }
+            let ax = win as! AXUIElement
+            var wid: CGWindowID = 0
+            guard _AXUIElementGetWindow(ax, &wid) == .success, wid != 0 else { return }
+            self.touch(wid)
+        }
+        if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work) } else { work() }
+    }
+
+    private func touch(_ id: CGWindowID) {
+        if mru.first == id { return }
+        mru.removeAll { $0 == id }
+        mru.insert(id, at: 0)
+        if mru.count > 200 { mru.removeLast() }
     }
 
     var isVisible: Bool { panel != nil }
 
     func step(backward: Bool) {
         if panel == nil {
-            model.windows = WindowSwitcher.fetchWindows(thumbnails: Settings.shared.data.altTabThumbnails)
+            noteFocusedWindow(after: 0)
+            var list = WindowSwitcher.fetchWindows(thumbnails: Settings.shared.data.altTabThumbnails)
+            // Sắp theo MRU; cửa sổ chưa từng thấy giữ nguyên z-order phía sau
+            let rank = Dictionary(uniqueKeysWithValues: mru.enumerated().map { ($1, $0) })
+            list = list.enumerated().sorted { a, b in
+                let ra = rank[a.element.id] ?? (mru.count + a.offset)
+                let rb = rank[b.element.id] ?? (mru.count + b.offset)
+                return ra < rb
+            }.map { $0.element }
+            model.windows = list
             guard !model.windows.isEmpty else { return }
             model.detached = false
             model.index = model.windows.count > 1 ? (backward ? model.windows.count - 1 : 1) : 0
@@ -60,7 +107,9 @@ final class WindowSwitcher {
         guard panel != nil, model.index < model.windows.count else { cancel(); return }
         let w = model.windows[model.index]
         hide()
+        touch(w.id)
         WindowSwitcher.activate(w)
+        noteFocusedWindow(after: 0.3)
     }
 
     func cancel() { hide() }
@@ -167,6 +216,7 @@ final class WindowSwitcher {
             AXUIElementSetAttributeValue(ax, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
             AXUIElementPerformAction(ax, kAXRaiseAction as CFString)
             AXUIElementSetAttributeValue(ax, kAXMainAttribute as CFString, kCFBooleanTrue)
+            AXUIElementSetAttributeValue(ax, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         }
         NSRunningApplication(processIdentifier: w.pid)?.activate(options: [.activateIgnoringOtherApps])
     }

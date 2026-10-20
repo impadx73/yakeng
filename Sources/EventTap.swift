@@ -75,6 +75,7 @@ final class EventTap {
         switch type {
         case .leftMouseDown:
             viet.reset()
+            switcher.noteFocusedWindow(after: 0.25)
             return Unmanaged.passUnretained(event)
 
         case .flagsChanged:

@@ -8,7 +8,7 @@ final class Settings: ObservableObject {
     struct Config: Codable {
         // Ctrl → Cmd
         var ctrlRemapEnabled = true
-        var ctrlRemapKeys: [UInt16] = [0, 8, 9]                 // A, C, V
+        var ctrlRemapKeys: [UInt16] = [0, 8, 9, 7, 6]           // A, C, V, X, Z
         var ctrlRemapExcluded = "com.apple.Terminal, com.googlecode.iterm2"
 
         // Alt + Tab
@@ -43,7 +43,8 @@ final class Settings: ObservableObject {
 
     private init() {
         if let raw = UserDefaults.standard.data(forKey: key),
-           let d = try? JSONDecoder().decode(Config.self, from: raw) {
+           var d = try? JSONDecoder().decode(Config.self, from: raw) {
+            if d.ctrlRemapKeys == [0, 8, 9] { d.ctrlRemapKeys = [0, 8, 9, 7, 6] }   // nâng cấp mặc định cũ
             data = d
         } else {
             data = Config()
