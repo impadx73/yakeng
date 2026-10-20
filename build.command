@@ -51,6 +51,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
+xattr -cr "$APP" 2>/dev/null || true     # bỏ thuộc tính Finder/quarantine, nếu không codesign sẽ từ chối
 codesign --force --deep --sign - "$APP"
 
 echo "==> Đang tạo $DMG ..."
