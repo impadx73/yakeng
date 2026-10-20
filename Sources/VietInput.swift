@@ -14,7 +14,7 @@ final class VietInput {
         "company.thebrowser.Browser", "com.vivaldi.Vivaldi", "com.apple.Spotlight",
     ]
 
-    private var raw: [Character] = []     // các phím đã gõ của từ hiện tại
+    private var raw: [RawKey] = []        // các phím đã gõ của từ hiện tại
     private var displayed = ""            // chuỗi đang hiển thị trên màn hình cho từ này
 
     func reset() {
@@ -33,7 +33,7 @@ final class VietInput {
         if keyCode == 51 {
             guard !displayed.isEmpty else { return false }
             displayed.removeLast()
-            raw = Array(displayed)
+            raw = displayed.map { RawKey(ch: $0) }
             return false
         }
 
@@ -54,9 +54,11 @@ final class VietInput {
             return false
         }
 
-        let candidate = raw + [ch]
-        let new = Composer.compose(candidate, method: method, modernTone: modernTone, spellCheck: spellCheck)
-        raw = candidate
+        let candidate = raw + [RawKey(ch: ch)]
+        let (new, reverted) = Composer.compose(candidate, method: method, modernTone: modernTone, spellCheck: spellCheck)
+        // Phím vừa gõ huỷ dấu (gô + o → goo): chuỗi hiển thị trở thành chữ thuần,
+        // không khôi phục các phím cũ nữa (gooogle → google, không phải gooogle)
+        raw = reverted ? new.map { RawKey(ch: $0, literal: true) } : candidate
         if new == displayed + String(ch) {
             // Không có gì thay đổi: để phím đi qua bình thường
             displayed = new
@@ -98,12 +100,19 @@ final class VietInput {
 
 // MARK: - Bộ ghép chữ
 
+/// Một phím đã gõ; `literal` = chữ thuần, không được biến đổi thêm (sau khi huỷ dấu).
+struct RawKey {
+    var ch: Character
+    var literal = false
+}
+
 enum Composer {
     struct VChar {
         var base: Character   // chữ thường, không dấu: a e i o u y d b c ...
         var mod = 0           // 0: không; 1: mũ (â ê ô) / đ; 2: móc, trăng (ơ ư ă)
         var upper: Bool
         var loneW = false     // "ư" tạo từ phím w đứng một mình
+        var literal = false   // không nhận biến đổi/dấu thanh nữa
     }
 
     private static let vowels: Set<Character> = ["a", "e", "i", "o", "u", "y"]
@@ -138,18 +147,22 @@ enum Composer {
         return t
     }()
 
-    static func compose(_ raw: [Character], method: String, modernTone: Bool, spellCheck: Bool = true) -> String {
+    /// Trả về (chuỗi hiển thị, phím cuối cùng có huỷ dấu/biến đổi không).
+    static func compose(_ raw: [RawKey], method: String, modernTone: Bool, spellCheck: Bool = true) -> (String, Bool) {
         var chars: [VChar] = []
         var tone = 0
+        var reverted = false
 
-        for k in raw {
-            // Ký tự đã có dấu (sau khi backspace, từ được dựng lại từ chuỗi hiển thị)
-            if !k.isASCII {
-                if let d = decomposeTable[Character(k.lowercased())] {
-                    chars.append(VChar(base: d.base, mod: d.mod, upper: k.isUppercase))
+        for (idx, key) in raw.enumerated() {
+            let k = key.ch
+            let isLast = idx == raw.count - 1
+            // Ký tự đã có dấu (sau khi backspace, từ được dựng lại từ chuỗi hiển thị) hoặc chữ thuần
+            if !k.isASCII || key.literal {
+                if !k.isASCII, let d = decomposeTable[Character(k.lowercased())] {
+                    chars.append(VChar(base: d.base, mod: d.mod, upper: k.isUppercase, literal: key.literal))
                     if d.tone != 0 { tone = d.tone }
                 } else {
-                    chars.append(VChar(base: Character(k.lowercased()), mod: 0, upper: k.isUppercase))
+                    chars.append(VChar(base: Character(k.lowercased()), mod: 0, upper: k.isUppercase, literal: key.literal))
                 }
                 continue
             }
@@ -163,6 +176,7 @@ enum Composer {
                     if tone != 0 { tone = 0; handled = true }
                 } else if tone == t {
                     tone = 0            // gõ lại cùng dấu: bỏ dấu, chữ thành ký tự thường
+                    if isLast { reverted = true }
                 } else {
                     tone = t
                     handled = true
@@ -171,7 +185,9 @@ enum Composer {
 
             // 2. Phím biến đổi chữ (â ê ô ơ ư ă đ)
             if !handled, let m = modKey(lower, method: method) {
+                let before = chars.map { "\($0.base)\($0.mod)" }
                 handled = applyMod(&chars, m, lower: lower, upper: upper)
+                if !handled, isLast, before != chars.map({ "\($0.base)\($0.mod)" }) { reverted = true }
             }
 
             // 3. Chữ thường
@@ -179,10 +195,10 @@ enum Composer {
                 chars.append(VChar(base: lower, mod: 0, upper: upper))
             }
         }
-        if spellCheck, !isValidSyllable(chars, tone: tone) {
-            return String(raw)
+        if spellCheck, !reverted, !isValidSyllable(chars, tone: tone) {
+            return (String(raw.map { $0.ch }), reverted)
         }
-        return render(chars, tone: tone, modernTone: modernTone)
+        return (render(chars, tone: tone, modernTone: modernTone), reverted)
     }
 
     // MARK: Kiểm tra chính tả
@@ -277,7 +293,7 @@ enum Composer {
     }
 
     private static func hasVowel(_ chars: [VChar]) -> Bool {
-        chars.contains { vowels.contains($0.base) }
+        chars.contains { vowels.contains($0.base) && !$0.literal }
     }
 
     // MARK: Áp dụng biến đổi
@@ -286,7 +302,7 @@ enum Composer {
         switch m {
         case .circA, .circE, .circO:
             // Telex: aa→â, ee→ê, oo→ô (phím phải ngay sau nguyên âm đó); gõ lần nữa thì trả lại
-            guard let last = chars.last, last.base == lower else { return false }
+            guard let last = chars.last, last.base == lower, !last.literal else { return false }
             if last.mod == 0 {
                 chars[chars.count - 1].mod = 1
                 return true
@@ -299,7 +315,7 @@ enum Composer {
 
         case .circAny:
             // VNI 6: mũ cho nguyên âm a/e/o cuối cùng
-            if let i = chars.lastIndex(where: { ["a", "e", "o"].contains($0.base) }) {
+            if let i = chars.lastIndex(where: { ["a", "e", "o"].contains($0.base) && !$0.literal }) {
                 if chars[i].mod == 1 { chars[i].mod = 0; return false }
                 chars[i].mod = 1
                 return true
@@ -308,12 +324,12 @@ enum Composer {
 
         case .horn, .breve, .hornOrBreve:
             // Trả lại nếu phím w gõ 2 lần
-            if m == .hornOrBreve, let last = chars.last, last.mod == 2 {
+            if m == .hornOrBreve, let last = chars.last, last.mod == 2, !last.literal {
                 if last.loneW { chars.removeLast() } else { chars[chars.count - 1].mod = 0 }
                 return false
             }
             let targets: Set<Character> = (m == .horn) ? ["o", "u"] : (m == .breve) ? ["a"] : ["a", "o", "u"]
-            if let i = chars.lastIndex(where: { targets.contains($0.base) && $0.mod == 0 }) {
+            if let i = chars.lastIndex(where: { targets.contains($0.base) && $0.mod == 0 && !$0.literal }) {
                 chars[i].mod = 2
                 // "uo" + w → "ươ"
                 if chars[i].base == "o", i > 0, chars[i - 1].base == "u", chars[i - 1].mod == 0 {
@@ -329,13 +345,13 @@ enum Composer {
 
         case .dd:
             if lower == "9" {   // VNI
-                if let i = chars.lastIndex(where: { $0.base == "d" }) {
+                if let i = chars.lastIndex(where: { $0.base == "d" && !$0.literal }) {
                     chars[i].mod = (chars[i].mod == 1) ? 0 : 1
                     return chars[i].mod == 1
                 }
                 return false
             }
-            guard let last = chars.last, last.base == "d" else { return false }
+            guard let last = chars.last, last.base == "d", !last.literal else { return false }
             if last.mod == 0 { chars[chars.count - 1].mod = 1; return true }
             chars[chars.count - 1].mod = 0
             return false

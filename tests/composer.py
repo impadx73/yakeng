@@ -20,8 +20,14 @@ DECOMP["đ"] = ("d", 1, 0)
 
 
 class VChar:
-    def __init__(self, base, mod=0, upper=False, lone_w=False):
-        self.base, self.mod, self.upper, self.lone_w = base, mod, upper, lone_w
+    def __init__(self, base, mod=0, upper=False, lone_w=False, literal=False):
+        self.base, self.mod, self.upper, self.lone_w, self.literal = base, mod, upper, lone_w, literal
+
+
+class RawKey:
+    """Một phím đã gõ; literal=True nghĩa là chữ thuần, không được biến đổi thêm (sau khi huỷ dấu)."""
+    def __init__(self, ch, literal=False):
+        self.ch, self.literal = ch, literal
 
 
 def tone_key(c, method):
@@ -37,7 +43,7 @@ def mod_key(c, method):
 
 
 def has_vowel(chars):
-    return any(c.base in VOWELS for c in chars)
+    return any(c.base in VOWELS and not c.literal for c in chars)
 
 
 def last_index(chars, pred):
@@ -49,7 +55,7 @@ def last_index(chars, pred):
 
 def apply_mod(chars, m, lower, upper):
     if m in ("circA", "circE", "circO"):
-        if not chars or chars[-1].base != lower:
+        if not chars or chars[-1].base != lower or chars[-1].literal:
             return False
         if chars[-1].mod == 0:
             chars[-1].mod = 1
@@ -59,7 +65,7 @@ def apply_mod(chars, m, lower, upper):
             return False
         return False
     if m == "circAny":
-        i = last_index(chars, lambda c: c.base in "aeo")
+        i = last_index(chars, lambda c: c.base in "aeo" and not c.literal)
         if i is not None:
             if chars[i].mod == 1:
                 chars[i].mod = 0
@@ -68,14 +74,14 @@ def apply_mod(chars, m, lower, upper):
             return True
         return False
     if m in ("horn", "breve", "hornOrBreve"):
-        if m == "hornOrBreve" and chars and chars[-1].mod == 2:
+        if m == "hornOrBreve" and chars and chars[-1].mod == 2 and not chars[-1].literal:
             if chars[-1].lone_w:
                 chars.pop()
             else:
                 chars[-1].mod = 0
             return False
         targets = {"o", "u"} if m == "horn" else ({"a"} if m == "breve" else {"a", "o", "u"})
-        i = last_index(chars, lambda c: c.base in targets and c.mod == 0)
+        i = last_index(chars, lambda c: c.base in targets and c.mod == 0 and not c.literal)
         if i is not None:
             chars[i].mod = 2
             if chars[i].base == "o" and i > 0 and chars[i - 1].base == "u" and chars[i - 1].mod == 0:
@@ -87,12 +93,12 @@ def apply_mod(chars, m, lower, upper):
         return False
     if m == "dd":
         if lower == "9":
-            i = last_index(chars, lambda c: c.base == "d")
+            i = last_index(chars, lambda c: c.base == "d" and not c.literal)
             if i is not None:
                 chars[i].mod = 0 if chars[i].mod == 1 else 1
                 return chars[i].mod == 1
             return False
-        if not chars or chars[-1].base != "d":
+        if not chars or chars[-1].base != "d" or chars[-1].literal:
             return False
         if chars[-1].mod == 0:
             chars[-1].mod = 1
@@ -196,21 +202,21 @@ def is_valid_syllable(chars, tone):
 
 
 def compose(raw, method="telex", modern=False, spellcheck=True):
-    out = _compose(raw, method, modern, spellcheck)
-    return out
-
-
-def _compose(raw, method, modern, spellcheck):
+    """raw: list[RawKey] hoặc str. Trả về (chuỗi hiển thị, phím cuối có huỷ dấu không)."""
+    keys = [k if isinstance(k, RawKey) else RawKey(k) for k in raw]
     chars, tone = [], 0
-    for k in raw:
-        if ord(k) > 127:
-            d = DECOMP.get(k.lower())
+    reverted = False
+    for idx, key in enumerate(keys):
+        k = key.ch
+        is_last = idx == len(keys) - 1
+        if ord(k) > 127 or key.literal:
+            d = DECOMP.get(k.lower()) if ord(k) > 127 else None
             if d:
-                chars.append(VChar(d[0], d[1], k.isupper()))
+                chars.append(VChar(d[0], d[1], k.isupper(), literal=key.literal))
                 if d[2]:
                     tone = d[2]
             else:
-                chars.append(VChar(k.lower(), 0, k.isupper()))
+                chars.append(VChar(k.lower(), 0, k.isupper(), literal=key.literal))
             continue
         lower, upper = k.lower(), k.isupper()
         handled = False
@@ -221,17 +227,23 @@ def _compose(raw, method, modern, spellcheck):
                     tone, handled = 0, True
             elif tone == t:
                 tone = 0
+                if is_last:
+                    reverted = True
             else:
                 tone, handled = t, True
         if not handled:
             m = mod_key(lower, method)
             if m:
+                before = [(c.base, c.mod) for c in chars]
                 handled = apply_mod(chars, m, lower, upper)
+                after = [(c.base, c.mod) for c in chars]
+                if not handled and is_last and before != after:
+                    reverted = True
         if not handled:
             chars.append(VChar(lower, 0, upper))
-    if spellcheck and not is_valid_syllable(chars, tone):
-        return "".join(raw)
-    return render(chars, tone, modern)
+    if spellcheck and not reverted and not is_valid_syllable(chars, tone):
+        return "".join(k.ch for k in keys), reverted
+    return render(chars, tone, modern), reverted
 
 
 # Mô phỏng VietInput.handle: gõ từng phím, trả về chuỗi hiển thị cuối cùng
@@ -241,10 +253,13 @@ def type_word(keys, method="telex", modern=False):
         if k == "\b":
             if displayed:
                 displayed = displayed[:-1]
-                raw = list(displayed)
+                raw = [RawKey(c) for c in displayed]
             continue
-        raw.append(k)
-        displayed = compose(raw, method, modern)
+        candidate = raw + [RawKey(k)]
+        new, reverted = compose(candidate, method, modern)
+        # Huỷ dấu: chuỗi hiển thị trở thành chữ thuần, không khôi phục phím cũ nữa
+        raw = [RawKey(c, literal=True) for c in new] if reverted else candidate
+        displayed = new
     return displayed
 
 
@@ -255,14 +270,15 @@ if __name__ == "__main__":
         ("hoa", "hoa"), ("hoas", "hóa"), ("thuys", "thúy"), ("quas", "quá"), ("gias", "giá"),
         ("toans", "toán"), ("ngoaif", "ngoài"), ("khoer", "khỏe"), ("muwa", "mưa"), ("muwas", "mứa"),
         ("cuar", "của"), ("ruowuj", "rượu"), ("yeeu", "yêu"), ("tuyeejt", "tuyệt"), ("ddieen", "điên"),
-        ("ass", "ass"), ("aaa", "aaa"), ("ddd", "ddd"), ("casch", "cách"), ("laptop", "laptop"),
+        ("ass", "as"), ("aaa", "aa"), ("ddd", "dd"), ("casch", "cách"), ("laptop", "laptop"),
         ("Vieejt", "Việt"), ("VIEEJT", "VIỆT"), ("Traanf", "Trần"), ("chuwa", "chưa"), ("ddooi", "đôi"),
         ("bieets", "biết"), ("quoocs", "quốc"), ("nhuwngx", "những"), ("mootj", "một"), ("hocj", "học"),
         ("tooi", "tôi"), ("xin", "xin"), ("chaof", "chào"), ("uwowts", "ướt"),
-        ("quyeens", "quyến"), ("thuowngf", "thường"), ("files", "files"), ("and", "and"), ("ass", "ass"),
+        ("quyeens", "quyến"), ("thuowngf", "thường"), ("files", "files"), ("and", "and"), ("ass", "as"),
         ("gif", "gì"), ("giuwx", "giữ"), ("gieeng", "giêng"), ("ngoawnf", "ngoằn"), ("ddaams", "đấm"),
         ("thuyeetj", "thuyệt"), ("khoong", "không"), ("nghieeng", "nghiêng"), ("test", "tét"),
-        ("ddeens", "đến"), ("rooif", "rồi"), ("owi", "ơi"), ("uwf", "ừ"), ("mwowif", "mười"),
+        ("ddeens", "đến"), ("gooogle", "google"), ("google", "google"), ("gooo", "goo"), ("gooof", "goof"),
+        ("tooo", "too"), ("ddd", "dd"), ("dddd", "ddd"), ("wwwf", "wwf"), ("ngoanf", "ngoàn"), ("rooif", "rồi"), ("owi", "ơi"), ("uwf", "ừ"), ("mwowif", "mười"),
     ]
     bad = 0
     for keys, want in cases:
