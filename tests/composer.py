@@ -193,7 +193,7 @@ def is_valid_syllable(chars, tone):
     if initial not in INITIALS or final not in FINALS:
         return False
     if not cluster:
-        return initial in ("gi", "qu")   # "gi", "qu" đang gõ dở
+        return final == ""               # đang gõ dở, mới có phụ âm đầu: "đ", "ng", "tr", "qu", "gi"
     if "".join(cluster) not in CLUSTERS:
         return False
     if final in STOP_FINALS and tone in (2, 3, 4):
@@ -277,7 +277,7 @@ if __name__ == "__main__":
         ("quyeens", "quyến"), ("thuowngf", "thường"), ("files", "files"), ("and", "and"), ("ass", "as"),
         ("gif", "gì"), ("giuwx", "giữ"), ("gieeng", "giêng"), ("ngoawnf", "ngoằn"), ("ddaams", "đấm"),
         ("thuyeetj", "thuyệt"), ("khoong", "không"), ("nghieeng", "nghiêng"), ("test", "tét"),
-        ("ddeens", "đến"), ("gooogle", "google"), ("google", "google"), ("gooo", "goo"), ("gooof", "goof"),
+        ("ddeens", "đến"), ("dd", "đ"), ("ddd", "dd"), ("ngh", "ngh"), ("qu", "qu"), ("DD", "Đ"), ("gooogle", "google"), ("google", "google"), ("gooo", "goo"), ("gooof", "goof"),
         ("tooo", "too"), ("ddd", "dd"), ("dddd", "ddd"), ("wwwf", "wwf"), ("ngoanf", "ngoàn"), ("rooif", "rồi"), ("owi", "ơi"), ("uwf", "ừ"), ("mwowif", "mười"),
     ]
     bad = 0

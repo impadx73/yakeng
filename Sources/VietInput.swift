@@ -266,7 +266,7 @@ enum Composer {
         if initial == "q", cluster.first == "u" { initial = "qu"; cluster.removeFirst() }
         else if initial == "g", cluster.count > 1, cluster.first == "i" { initial = "gi"; cluster.removeFirst() }
         guard initials.contains(initial), finals.contains(final) else { return false }
-        if cluster.isEmpty { return initial == "gi" || initial == "qu" }
+        if cluster.isEmpty { return final.isEmpty }   // đang gõ dở, mới có phụ âm đầu: "đ", "ng", "tr"…
         guard clusters.contains(String(cluster)) else { return false }
         if stopFinals.contains(final), [2, 3, 4].contains(tone) { return false }
         return true
