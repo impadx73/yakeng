@@ -14,6 +14,8 @@ final class Settings: ObservableObject {
         // Alt + Tab
         var altTabEnabled = true
         var altTabHotkey = Hotkey(keyCode: 48, modifiers: .option)          // ⌥⇥
+        var altTabSticky = false        // thả ⌥ vẫn giữ bảng mở, chọn bằng chuột/Enter
+        var altTabThumbnails = true     // hiện ảnh thu nhỏ cửa sổ
 
         // Clipboard
         var clipboardEnabled = true

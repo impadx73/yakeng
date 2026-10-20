@@ -85,7 +85,7 @@ struct GeneralTab: View {
                 .padding(6)
             }
             Spacer()
-            Text("Yakeng 2.0 – mã nguồn: github.com/impadx73/yakeng")
+            Text("Yakeng 2.1 – mã nguồn: github.com/impadx73/yakeng")
                 .font(.caption).foregroundColor(.secondary)
         }
     }
@@ -150,7 +150,9 @@ struct AltTabTab: View {
                 Text("(giữ phím bổ trợ, bấm phím chính để duyệt, thêm ⇧ để lùi)")
                     .font(.caption).foregroundColor(.secondary)
             }
-            Text("Giữ ⌥ và bấm ⇥ để duyệt qua *từng cửa sổ* đang mở (không phải từng app như ⌘⇥ của macOS). Thả ⌥ để chuyển sang cửa sổ được chọn, Esc để huỷ.")
+            Toggle("Hiện ảnh thu nhỏ của cửa sổ (cần quyền Ghi màn hình)", isOn: $settings.data.altTabThumbnails)
+            Toggle("Thả ⌥ vẫn giữ bảng mở – chọn bằng chuột, ←→ hoặc Enter", isOn: $settings.data.altTabSticky)
+            Text("Giữ ⌥ và bấm ⇥ để duyệt qua *từng cửa sổ* đang mở (không phải từng app như ⌘⇥ của macOS). Có thể di chuột và bấm vào cửa sổ muốn chuyển. Thả ⌥ để chuyển sang cửa sổ được chọn, Esc để huỷ.")
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
         }

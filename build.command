@@ -13,7 +13,9 @@ fi
 
 APP="Yakeng.app"
 DMG="Yakeng.dmg"
-VERSION="2.0"
+VERSION="2.1"
+pkill -x Yakeng 2>/dev/null || true
+sleep 0.5
 rm -rf "$APP" "$DMG" dmg-root build.log
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -83,6 +85,7 @@ echo "  DMG: $PWD/$DMG"
 echo
 echo "Cài trên máy khác: mở Yakeng.dmg, kéo Yakeng vào Applications,"
 echo "lần đầu nhấp chuột phải vào app -> Open, rồi bật quyền Accessibility khi được hỏi."
+open "$APP"
 open -R "$DMG"
 echo
 read -n 1 -s -r -p "Nhấn phím bất kỳ để đóng cửa sổ này..."

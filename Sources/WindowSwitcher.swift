@@ -11,24 +11,39 @@ struct WinInfo: Identifiable {
     let title: String
     let appName: String
     let icon: NSImage?
+    var thumbnail: NSImage?
 }
 
 final class SwitcherModel: ObservableObject {
     @Published var windows: [WinInfo] = []
     @Published var index = 0
+    @Published var detached = false        // đã thả ⌥, bảng vẫn mở
+    var onSelect: ((Int) -> Void)?
+    var onHover: ((Int) -> Void)?
 }
 
 /// Bảng chuyển cửa sổ kiểu Windows: giữ ⌥, bấm ⇥ để duyệt, thả ⌥ để chọn.
+/// Có thể dùng chuột (di để chọn, bấm để chuyển), ←/→, Enter, Esc.
 final class WindowSwitcher {
     private var panel: NSPanel?
     private let model = SwitcherModel()
+
+    init() {
+        model.onSelect = { [weak self] i in
+            guard let self = self else { return }
+            self.model.index = i
+            self.commit()
+        }
+        model.onHover = { [weak self] i in self?.model.index = i }
+    }
 
     var isVisible: Bool { panel != nil }
 
     func step(backward: Bool) {
         if panel == nil {
-            model.windows = WindowSwitcher.fetchWindows()
+            model.windows = WindowSwitcher.fetchWindows(thumbnails: Settings.shared.data.altTabThumbnails)
             guard !model.windows.isEmpty else { return }
+            model.detached = false
             model.index = model.windows.count > 1 ? (backward ? model.windows.count - 1 : 1) : 0
             show()
         } else {
@@ -37,6 +52,9 @@ final class WindowSwitcher {
             model.index = (model.index + (backward ? -1 : 1) + n) % n
         }
     }
+
+    /// Thả phím bổ trợ ở chế độ "giữ bảng": không chuyển ngay, chờ chuột/Enter.
+    func detach() { model.detached = true }
 
     func commit() {
         guard panel != nil, model.index < model.windows.count else { cancel(); return }
@@ -50,22 +68,24 @@ final class WindowSwitcher {
     // MARK: - Giao diện
 
     private func show() {
-        let view = SwitcherView(model: model)
-        let host = NSHostingView(rootView: view)
+        let host = ClickableHostingView(rootView: SwitcherView(model: model))
         let size = host.fittingSize
-        let p = NSPanel(contentRect: NSRect(origin: .zero, size: size),
-                        styleMask: [.borderless, .nonactivatingPanel],
-                        backing: .buffered, defer: false)
+        let p = SwitcherPanel(contentRect: NSRect(origin: .zero, size: size),
+                              styleMask: [.borderless, .nonactivatingPanel],
+                              backing: .buffered, defer: false)
+        p.acceptsMouseMovedEvents = true
         p.level = .popUpMenu
         p.isOpaque = false
         p.backgroundColor = .clear
         p.hasShadow = true
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        p.isReleasedWhenClosed = false
         p.contentView = host
         if let screen = NSScreen.main {
             let f = screen.visibleFrame
             p.setFrameOrigin(NSPoint(x: f.midX - size.width / 2, y: f.midY - size.height / 2))
         }
+        p.makeKeyAndOrderFront(nil)
         p.orderFrontRegardless()
         panel = p
     }
@@ -77,7 +97,7 @@ final class WindowSwitcher {
 
     // MARK: - Danh sách cửa sổ
 
-    static func fetchWindows() -> [WinInfo] {
+    static func fetchWindows(thumbnails: Bool) -> [WinInfo] {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
         let myPid = ProcessInfo.processInfo.processIdentifier
         var result: [WinInfo] = []
@@ -97,9 +117,30 @@ final class WindowSwitcher {
             let app = NSRunningApplication(processIdentifier: pid)
             guard app?.activationPolicy == .regular else { continue }
             if iconCache[pid] == nil { iconCache[pid] = app?.icon }
-            result.append(WinInfo(id: num, pid: pid, title: title, appName: app?.localizedName ?? owner, icon: iconCache[pid] ?? nil))
+            var info = WinInfo(id: num, pid: pid, title: title, appName: app?.localizedName ?? owner, icon: iconCache[pid] ?? nil, thumbnail: nil)
+            if thumbnails { info.thumbnail = snapshot(of: num) }
+            result.append(info)
+            if result.count >= 24 { break }
         }
         return result
+    }
+
+    /// Ảnh thu nhỏ của một cửa sổ (cần quyền Ghi màn hình; nếu chưa có thì trả về nil).
+    /// `CGWindowListCreateImage` bị SDK mới đánh dấu không dùng được khi biên dịch,
+    /// nhưng vẫn tồn tại lúc chạy – gọi qua dlsym.
+    private typealias CreateImageFn = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+    private static let createImage: CreateImageFn? = {
+        guard let sym = dlsym(dlopen(nil, RTLD_NOW), "CGWindowListCreateImage") else { return nil }
+        return unsafeBitCast(sym, to: CreateImageFn.self)
+    }()
+
+    static func snapshot(of id: CGWindowID) -> NSImage? {
+        guard let fn = createImage else { return nil }
+        let optIncludingWindow: UInt32 = 1 << 3            // kCGWindowListOptionIncludingWindow
+        let imgOpts: UInt32 = (1 << 0) | (1 << 4)          // boundsIgnoreFraming | nominalResolution
+        guard let cg = fn(.null, optIncludingWindow, id, imgOpts)?.takeRetainedValue(),
+              cg.width > 1, cg.height > 1 else { return nil }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
 
     // MARK: - Kích hoạt cửa sổ
@@ -131,38 +172,85 @@ final class WindowSwitcher {
     }
 }
 
+/// Panel không kích hoạt app nhưng vẫn nhận được chuột/bàn phím.
+final class SwitcherPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
+/// NSHostingView nhận click ngay cả khi cửa sổ không phải key window.
+final class ClickableHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 // MARK: - SwiftUI
 
 struct SwitcherView: View {
     @ObservedObject var model: SwitcherModel
 
-    private let cell: CGFloat = 128
-    private var perRow: Int { max(1, min(model.windows.count, 7)) }
+    private let cellW: CGFloat = 208
+    private let cellH: CGFloat = 176
+    private var perRow: Int { max(1, min(model.windows.count, 5)) }
 
     var body: some View {
-        let columns = Array(repeating: GridItem(.fixed(cell), spacing: 10), count: perRow)
-        LazyVGrid(columns: columns, spacing: 10) {
-            ForEach(Array(model.windows.enumerated()), id: \.offset) { i, w in
-                VStack(spacing: 6) {
-                    if let icon = w.icon {
-                        Image(nsImage: icon).resizable().frame(width: 56, height: 56)
-                    } else {
-                        Image(systemName: "macwindow").resizable().frame(width: 48, height: 48)
-                    }
-                    Text(w.title.isEmpty ? w.appName : w.title)
-                        .font(.caption).lineLimit(2).multilineTextAlignment(.center)
-                    Text(w.appName).font(.caption2).foregroundColor(.secondary).lineLimit(1)
+        let columns = Array(repeating: GridItem(.fixed(cellW), spacing: 10), count: perRow)
+        VStack(spacing: 8) {
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(Array(model.windows.enumerated()), id: \.offset) { pair in
+                    let i = pair.offset
+                    let w = pair.element
+                    SwitcherTile(window: w, selected: i == model.index, width: cellW, height: cellH)
+                        .onHover { if $0 { model.onHover?(i) } }
+                        .onTapGesture { model.onSelect?(i) }
                 }
-                .padding(8)
-                .frame(width: cell, height: 124)
-                .background(RoundedRectangle(cornerRadius: 12)
-                    .fill(i == model.index ? Color.accentColor.opacity(0.75) : Color.clear))
             }
+            Text(model.detached
+                 ? "Bấm chuột hoặc Enter để chuyển · Esc để đóng"
+                 : "Giữ ⌥ và bấm ⇥ / ←→ để chọn · thả ⌥ hoặc bấm chuột để chuyển")
+                .font(.caption).foregroundColor(.secondary)
         }
-        .padding(18)
+        .padding(16)
         .background(VisualEffectView())
         .cornerRadius(18)
-        .frame(width: CGFloat(perRow) * (cell + 10) + 26)
+        .frame(width: CGFloat(perRow) * (cellW + 10) + 22)
+    }
+}
+
+struct SwitcherTile: View {
+    let window: WinInfo
+    let selected: Bool
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ZStack(alignment: .bottomTrailing) {
+                if let thumb = window.thumbnail {
+                    Image(nsImage: thumb)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: width - 16, height: height - 56)
+                        .cornerRadius(6)
+                } else if let icon = window.icon {
+                    Image(nsImage: icon).resizable()
+                        .frame(width: 72, height: 72)
+                        .frame(width: width - 16, height: height - 56)
+                } else {
+                    Image(systemName: "macwindow").resizable().frame(width: 48, height: 48)
+                        .frame(width: width - 16, height: height - 56)
+                }
+                if window.thumbnail != nil, let icon = window.icon {
+                    Image(nsImage: icon).resizable().frame(width: 28, height: 28).offset(x: 2, y: 4)
+                }
+            }
+            Text(window.title.isEmpty ? window.appName : window.title)
+                .font(.caption).lineLimit(1)
+            Text(window.appName).font(.caption2).foregroundColor(.secondary).lineLimit(1)
+        }
+        .padding(8)
+        .frame(width: width, height: height)
+        .background(RoundedRectangle(cornerRadius: 12)
+            .fill(selected ? Color.accentColor.opacity(0.7) : Color.white.opacity(0.06)))
+        .contentShape(Rectangle())
     }
 }
 

@@ -48,7 +48,12 @@ final class EventTap {
 
     // MARK: - Xử lý sự kiện
 
-    func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+    /// Proxy của sự kiện đang xử lý – dùng để chèn phím giả lập đúng thứ tự.
+    private var currentProxy: CGEventTapProxy?
+
+    func handle(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        currentProxy = proxy
+        defer { currentProxy = nil }
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let t = tap { CGEvent.tapEnable(tap: t, enable: true) }
             return Unmanaged.passUnretained(event)
@@ -68,7 +73,7 @@ final class EventTap {
 
         case .flagsChanged:
             if switcher.isVisible, !cfg.altTabHotkey.modifiersHeld(in: flags) {
-                switcher.commit()
+                if cfg.altTabSticky { switcher.detach() } else { switcher.commit() }
             }
             return Unmanaged.passUnretained(event)
 
@@ -102,6 +107,9 @@ final class EventTap {
             }
             if switcher.isVisible {
                 if keyCode == 53 { DispatchQueue.main.async { self.switcher.cancel() } }   // Esc
+                if keyCode == 36 || keyCode == 76 { DispatchQueue.main.async { self.switcher.commit() } }   // Enter
+                if keyCode == 123 { DispatchQueue.main.async { self.switcher.step(backward: true) } }   // ←
+                if keyCode == 124 { DispatchQueue.main.async { self.switcher.step(backward: false) } }  // →
                 return nil
             }
 
@@ -141,10 +149,16 @@ final class EventTap {
 
     // MARK: - Gửi phím giả lập
 
+    /// Gửi sự kiện: nếu đang ở trong callback của tap thì chèn ngay sau sự kiện hiện tại
+    /// (đúng thứ tự, không bị ứng dụng như Chrome xử lý lệch); nếu không thì đưa vào hàng đợi HID.
     static func post(_ e: CGEvent?) {
         guard let e = e else { return }
         e.setIntegerValueField(.eventSourceUserData, value: magic)
-        e.post(tap: .cghidEventTap)
+        if let proxy = shared.currentProxy {
+            e.tapPostEvent(proxy)
+        } else {
+            e.post(tap: .cghidEventTap)
+        }
     }
 
     static func sendKey(_ keyCode: CGKeyCode, flags: CGEventFlags = []) {
@@ -159,12 +173,15 @@ final class EventTap {
     static func sendBackspace() { sendKey(51) }
 
     static func sendText(_ s: String) {
-        for ch in s {
-            var units = Array(String(ch).utf16)
+        // Mỗi sự kiện chứa tối đa 20 đơn vị UTF-16
+        var units = Array(s.utf16)
+        while !units.isEmpty {
+            var chunk = Array(units.prefix(20))
+            units.removeFirst(chunk.count)
             let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)
             let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
-            down?.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
-            up?.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
+            down?.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: &chunk)
+            up?.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: &chunk)
             down?.flags = []
             up?.flags = []
             post(down)
@@ -174,5 +191,5 @@ final class EventTap {
 }
 
 private func yakengTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
-    return EventTap.shared.handle(type: type, event: event)
+    return EventTap.shared.handle(proxy: proxy, type: type, event: event)
 }

@@ -21,13 +21,12 @@ final class VietInput {
             return false
         }
 
-        // Backspace
+        // Backspace: xoá nguyên một ký tự đang hiển thị (â, ầ…), rồi dựng lại từ phần còn lại
         if keyCode == 51 {
-            guard !raw.isEmpty else { return false }
-            raw.removeLast()
-            let new = Composer.compose(raw, method: method, modernTone: modernTone)
-            apply(new)
-            return true
+            guard !displayed.isEmpty else { return false }
+            displayed.removeLast()
+            raw = Array(displayed)
+            return false
         }
 
         // Các phím điều hướng, Enter, Tab, Esc… → kết thúc từ
@@ -111,11 +110,35 @@ enum Composer {
         "y0": ["y", "ý", "ỳ", "ỷ", "ỹ", "ỵ"],
     ]
 
+    /// Bảng ngược: chữ có dấu → (gốc, biến đổi, dấu thanh)
+    private static let decomposeTable: [Character: (base: Character, mod: Int, tone: Int)] = {
+        var t: [Character: (base: Character, mod: Int, tone: Int)] = [:]
+        for (key, forms) in toneTable {
+            let base = key.first!
+            let mod = Int(String(key.last!))!
+            for (tone, ch) in forms.enumerated() where tone > 0 || mod > 0 {
+                t[ch] = (base, mod, tone)
+            }
+        }
+        t["đ"] = ("d", 1, 0)
+        return t
+    }()
+
     static func compose(_ raw: [Character], method: String, modernTone: Bool) -> String {
         var chars: [VChar] = []
         var tone = 0
 
         for k in raw {
+            // Ký tự đã có dấu (sau khi backspace, từ được dựng lại từ chuỗi hiển thị)
+            if !k.isASCII {
+                if let d = decomposeTable[Character(k.lowercased())] {
+                    chars.append(VChar(base: d.base, mod: d.mod, upper: k.isUppercase))
+                    if d.tone != 0 { tone = d.tone }
+                } else {
+                    chars.append(VChar(base: Character(k.lowercased()), mod: 0, upper: k.isUppercase))
+                }
+                continue
+            }
             let lower = Character(k.lowercased())
             let upper = k.isUppercase
             var handled = false
