@@ -26,9 +26,22 @@ struct SettingsView: View {
 
 // MARK: - Chung
 
+final class PermissionState: ObservableObject {
+    @Published var granted = AXIsProcessTrusted()
+    private var timer: Timer?
+    init() {
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            let g = AXIsProcessTrusted()
+            if g != self?.granted { self?.granted = g }
+        }
+    }
+    deinit { timer?.invalidate() }
+}
+
 struct GeneralTab: View {
     @ObservedObject var settings: Settings
-    @State private var axGranted = AXIsProcessTrusted()
+    @ObservedObject var perm = PermissionState()
+    private var axGranted: Bool { perm.granted }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -47,9 +60,6 @@ struct GeneralTab: View {
                     }
                 }
                 .padding(6)
-                .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
-                    axGranted = AXIsProcessTrusted()
-                }
             }
 
             GroupBox("Khởi động") {

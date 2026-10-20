@@ -197,9 +197,13 @@ struct ClipboardView: View {
     }
 }
 
+final class HoverState: ObservableObject {
+    @Published var on = false
+}
+
 struct ClipRow: View {
     let item: ClipItem
-    @State private var hover = false
+    @ObservedObject private var hover = HoverState()
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -217,7 +221,7 @@ struct ClipRow: View {
             Spacer()
         }
         .padding(8)
-        .background(RoundedRectangle(cornerRadius: 6).fill(hover ? Color.accentColor.opacity(0.18) : Color.clear))
-        .onHover { hover = $0 }
+        .background(RoundedRectangle(cornerRadius: 6).fill(hover.on ? Color.accentColor.opacity(0.18) : Color.clear))
+        .onHover { hover.on = $0 }
     }
 }
