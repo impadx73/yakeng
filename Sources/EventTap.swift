@@ -20,11 +20,15 @@ final class EventTap {
     /// Tạm dừng xử lý (khi đang ghi phím tắt trong Cài đặt).
     var suspended = false
 
+    /// Bảng Alt+Tab đang (sắp) hiện – đặt ngay trên luồng tap, không chờ luồng chính.
+    private var switcherActive = false
+
     var onVietToggled: (() -> Void)?
 
     @discardableResult
     func start() -> Bool {
         if tap != nil { return true }
+        switcher.onHide = { [weak self] in self?.switcherActive = false }
         let mask: CGEventMask =
             (1 << CGEventType.keyDown.rawValue) |
             (1 << CGEventType.keyUp.rawValue) |
@@ -116,8 +120,11 @@ final class EventTap {
             return Unmanaged.passUnretained(event)
 
         case .flagsChanged:
-            if switcher.isVisible, !cfg.altTabHotkey.modifiersHeld(in: flags) {
+            // Dùng cờ switcherActive (đặt ngay trên luồng này) thay vì switcher.isVisible: bảng được
+            // hiện trên luồng chính, nếu thả ⌥ quá nhanh thì isVisible còn false → sẽ bỏ lỡ việc chuyển.
+            if switcherActive, !cfg.altTabHotkey.modifiersHeld(in: flags) {
                 let sticky = cfg.altTabSticky
+                if !sticky { switcherActive = false }
                 DispatchQueue.main.async { if sticky { self.switcher.detach() } else { self.switcher.commit() } }
             }
             return Unmanaged.passUnretained(event)
@@ -148,13 +155,14 @@ final class EventTap {
             // Alt + Tab
             if cfg.altTabEnabled, cfg.altTabHotkey.matches(keyCode: keyCode, flags: flags, ignoringShift: true) {
                 viet.reset()
+                switcherActive = true
                 let backward = flags.contains(.maskShift)
                 DispatchQueue.main.async { self.switcher.step(backward: backward) }
                 return nil
             }
-            if switcher.isVisible {
-                if keyCode == 53 { DispatchQueue.main.async { self.switcher.cancel() } }   // Esc
-                if keyCode == 36 || keyCode == 76 { DispatchQueue.main.async { self.switcher.commit() } }   // Enter
+            if switcherActive || switcher.isVisible {
+                if keyCode == 53 { switcherActive = false; DispatchQueue.main.async { self.switcher.cancel() } }   // Esc
+                if keyCode == 36 || keyCode == 76 { switcherActive = false; DispatchQueue.main.async { self.switcher.commit() } }   // Enter
                 if keyCode == 123 { DispatchQueue.main.async { self.switcher.step(backward: true) } }   // ←
                 if keyCode == 124 { DispatchQueue.main.async { self.switcher.step(backward: false) } }  // →
                 return nil

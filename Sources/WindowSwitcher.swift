@@ -142,9 +142,13 @@ final class WindowSwitcher {
         panel = p
     }
 
+    /// Gọi khi bảng đóng (chuyển/huỷ) để EventTap bỏ cờ switcherActive.
+    var onHide: (() -> Void)?
+
     private func hide() {
         panel?.orderOut(nil)
         panel = nil
+        onHide?()
     }
 
     // MARK: - Danh sách cửa sổ
