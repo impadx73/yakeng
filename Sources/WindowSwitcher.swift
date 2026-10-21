@@ -83,7 +83,8 @@ final class WindowSwitcher {
     func step(backward: Bool) {
         if panel == nil {
             noteFocusedWindow(after: 0)
-            var list = WindowSwitcher.fetchWindows(thumbnails: Settings.shared.data.altTabThumbnails)
+            // Hiện bảng ngay với icon; ảnh thu nhỏ chụp ở luồng nền rồi điền vào sau
+            var list = WindowSwitcher.fetchWindows(thumbnails: false)
             // Sắp theo MRU; cửa sổ chưa từng thấy giữ nguyên z-order phía sau
             let rank = Dictionary(uniqueKeysWithValues: mru.enumerated().map { ($1, $0) })
             list = list.enumerated().sorted { a, b in
@@ -96,10 +97,29 @@ final class WindowSwitcher {
             model.detached = false
             model.index = model.windows.count > 1 ? (backward ? model.windows.count - 1 : 1) : 0
             show()
+            if Settings.shared.data.altTabThumbnails { loadThumbnails(for: list.map { $0.id }) }
         } else {
             let n = model.windows.count
             guard n > 0 else { return }
             model.index = (model.index + (backward ? -1 : 1) + n) % n
+        }
+    }
+
+    private let thumbQueue = DispatchQueue(label: "yakeng.thumbnails", qos: .userInitiated)
+    private var thumbGeneration = 0
+
+    private func loadThumbnails(for ids: [CGWindowID]) {
+        thumbGeneration += 1
+        let gen = thumbGeneration
+        thumbQueue.async { [weak self] in
+            for id in ids {
+                guard let self = self, self.thumbGeneration == gen else { return }
+                guard let img = WindowSwitcher.snapshot(of: id) else { continue }
+                DispatchQueue.main.async {
+                    guard self.thumbGeneration == gen, let i = self.model.windows.firstIndex(where: { $0.id == id }) else { return }
+                    self.model.windows[i].thumbnail = img
+                }
+            }
         }
     }
 
