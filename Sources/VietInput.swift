@@ -5,7 +5,7 @@ import Cocoa
 final class VietInput {
     var method = "telex"          // "telex" | "vni"
     var modernTone = false        // true: hoà, thuý; false: hòa, thúy
-    var spellCheck = true         // từ không phải âm tiết tiếng Việt hợp lệ thì giữ nguyên (files → files)
+    var spellCheck = "lenient"    // "off" | "lenient" (chỉ xét phụ âm đầu) | "strict" (xét cả vần, phụ âm cuối)
     var browserFix = true         // gửi ký tự rỗng trước khi xoá để tránh gợi ý thanh địa chỉ nuốt backspace
 
     static let browserBundleIDs: Set<String> = [
@@ -75,8 +75,7 @@ final class VietInput {
         var common = 0
         while common < old.count, common < nw.count, old[common] == nw[common] { common += 1 }
         var del = old.count - common
-        if del > 0, browserFix, VietInput.browserBundleIDs.contains(EventTap.frontmostBundleID),
-           VietInput.isBrowserChromeFocused() {
+        if del > 0, browserFix, EventTap.shared.browserChromeFocused {
             // Cách của OpenKey: chèn một ký tự rỗng rồi xoá thêm 1, để gợi ý tự động của
             // thanh địa chỉ (đang được bôi đen) không làm lệch số backspace.
             // Chỉ áp dụng khi con trỏ ở thanh địa chỉ/giao diện trình duyệt, KHÔNG áp dụng trong
@@ -96,10 +95,12 @@ final class VietInput {
         guard let app = NSWorkspace.shared.frontmostApplication else { return false }
         if app.bundleIdentifier == "com.apple.Spotlight" { return true }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(axApp, 0.3)
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(axApp, kAXFocusedUIElementAttribute as CFString, &value) == .success,
               let focused = value else { return false }
         var element = focused as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, 0.3)
         for _ in 0..<30 {
             var roleValue: CFTypeRef?
             if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue) == .success,
@@ -175,7 +176,7 @@ enum Composer {
     }()
 
     /// Trả về (chuỗi hiển thị, phím cuối cùng có huỷ dấu/biến đổi không).
-    static func compose(_ raw: [RawKey], method: String, modernTone: Bool, spellCheck: Bool = true) -> (String, Bool) {
+    static func compose(_ raw: [RawKey], method: String, modernTone: Bool, spellCheck: String = "lenient") -> (String, Bool) {
         var chars: [VChar] = []
         var tone = 0
         var reverted = false
@@ -222,7 +223,7 @@ enum Composer {
                 chars.append(VChar(base: lower, mod: 0, upper: upper))
             }
         }
-        if spellCheck, !reverted, !isValidSyllable(chars, tone: tone) {
+        if spellCheck != "off", !reverted, !isValidSyllable(chars, tone: tone, strict: spellCheck == "strict") {
             return (String(raw.map { $0.ch }), reverted)
         }
         return (render(chars, tone: tone, modernTone: modernTone), reverted)
@@ -252,7 +253,7 @@ enum Composer {
     }
 
     /// Âm tiết hợp lệ: phụ âm đầu + cụm nguyên âm + phụ âm cuối đều nằm trong bảng.
-    static func isValidSyllable(_ chars: [VChar], tone: Int) -> Bool {
+    static func isValidSyllable(_ chars: [VChar], tone: Int, strict: Bool = true) -> Bool {
         if chars.isEmpty { return true }
         let letters = chars.map(letter)
         if letters.contains(where: { !vietLetters.contains($0) }) { return false }
@@ -265,6 +266,11 @@ enum Composer {
         let final = String(letters[j...])
         if initial == "q", cluster.first == "u" { initial = "qu"; cluster.removeFirst() }
         else if initial == "g", cluster.count > 1, cluster.first == "i" { initial = "gi"; cluster.removeFirst() }
+        if !strict {
+            // mức nhẹ: chỉ cần phần đầu không phải phụ âm lạ (f, j, w, z, fl, bl…) → cho phép đk, đc, ko
+            if !cluster.isEmpty { return initials.contains(initial) }
+            return initials.contains(String(initial.prefix(1))) || (initial.count > 1 && initials.contains(String(initial.prefix(2))))
+        }
         guard initials.contains(initial), finals.contains(final) else { return false }
         if cluster.isEmpty { return final.isEmpty }   // đang gõ dở, mới có phụ âm đầu: "đ", "ng", "tr"…
         guard clusters.contains(String(cluster)) else { return false }

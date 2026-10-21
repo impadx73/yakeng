@@ -29,10 +29,37 @@ final class Settings: ObservableObject {
         var vietToggleHotkey = Hotkey(keyCode: 6, modifiers: .option)       // ⌥Z
         var vietActive = true
         var vietModernTone = false                               // hoà (true) / hòa (false)
-        var vietSpellCheck = true                                // kiểm tra chính tả: từ lạ giữ nguyên
+        var vietSpellMode = "lenient"                            // "off" | "lenient" | "strict"
         var vietBrowserFix = true                                // sửa lỗi gợi ý thanh địa chỉ trình duyệt
 
         var launchAtLogin = false
+
+        init() {}
+
+        // Đọc từng trường nếu có, thiếu thì giữ mặc định → thêm trường mới không làm mất cài đặt cũ
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            func get<T: Decodable>(_ key: CodingKeys, _ def: T) -> T { (try? c.decodeIfPresent(T.self, forKey: key)) ?? def }
+            ctrlRemapEnabled = get(.ctrlRemapEnabled, ctrlRemapEnabled)
+            ctrlRemapKeys = get(.ctrlRemapKeys, ctrlRemapKeys)
+            ctrlRemapExcluded = get(.ctrlRemapExcluded, ctrlRemapExcluded)
+            altTabEnabled = get(.altTabEnabled, altTabEnabled)
+            altTabHotkey = get(.altTabHotkey, altTabHotkey)
+            altTabSticky = get(.altTabSticky, altTabSticky)
+            altTabThumbnails = get(.altTabThumbnails, altTabThumbnails)
+            clipboardEnabled = get(.clipboardEnabled, clipboardEnabled)
+            clipboardHotkey = get(.clipboardHotkey, clipboardHotkey)
+            clipboardMaxItems = get(.clipboardMaxItems, clipboardMaxItems)
+            clipboardPasteOnSelect = get(.clipboardPasteOnSelect, clipboardPasteOnSelect)
+            vietEnabled = get(.vietEnabled, vietEnabled)
+            vietMethod = get(.vietMethod, vietMethod)
+            vietToggleHotkey = get(.vietToggleHotkey, vietToggleHotkey)
+            vietActive = get(.vietActive, vietActive)
+            vietModernTone = get(.vietModernTone, vietModernTone)
+            vietSpellMode = get(.vietSpellMode, vietSpellMode)
+            vietBrowserFix = get(.vietBrowserFix, vietBrowserFix)
+            launchAtLogin = get(.launchAtLogin, launchAtLogin)
+        }
     }
 
     @Published var data: Config {

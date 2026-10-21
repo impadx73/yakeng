@@ -85,7 +85,7 @@ struct GeneralTab: View {
                 .padding(6)
             }
             Spacer()
-            Text("Yakeng 2.8 – mã nguồn: github.com/impadx73/yakeng")
+            Text("Yakeng 2.9 – mã nguồn: github.com/impadx73/yakeng")
                 .font(.caption).foregroundColor(.secondary)
         }
     }
@@ -201,7 +201,12 @@ struct VietTab: View {
                     .foregroundColor(settings.data.vietActive ? .green : .secondary)
             }
             Toggle("Đặt dấu kiểu mới (hoà, khoẻ, thuý thay vì hòa, khỏe, thúy)", isOn: $settings.data.vietModernTone)
-            Toggle("Kiểm tra chính tả – từ không phải tiếng Việt giữ nguyên (files, laptop…)", isOn: $settings.data.vietSpellCheck)
+            Picker("Kiểm tra chính tả:", selection: $settings.data.vietSpellMode) {
+                Text("Tắt – luôn bỏ dấu (files → filé)").tag("off")
+                Text("Nhẹ – chỉ chặn từ tiếng Anh rõ ràng (files, wifi), cho phép đk, đc, ko").tag("lenient")
+                Text("Chặt – chỉ bỏ dấu cho âm tiết tiếng Việt chuẩn").tag("strict")
+            }
+            .pickerStyle(.radioGroup)
             Toggle("Sửa lỗi gợi ý trên thanh địa chỉ trình duyệt (Chrome, Safari…)", isOn: $settings.data.vietBrowserFix)
             Text("Biểu tượng trên thanh menu hiển thị VI/EN. Khi gõ tiếng Anh, tắt nhanh bằng phím tắt để tránh bị bỏ dấu (ví dụ \"files\" → \"filés\").")
                 .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)

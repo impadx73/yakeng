@@ -41,10 +41,44 @@ final class EventTap {
         ) else { return false }
 
         tap = t
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, t, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: t, enable: true)
+        // Chạy tap trên luồng riêng, ưu tiên cao: mọi việc nặng trên luồng chính (SwiftUI, truy vấn
+        // Accessibility tới app khác…) không làm trễ phím; nếu trễ >1s macOS sẽ tắt tap và phím thô lọt ra.
+        let thread = Thread { [t] in
+            let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, t, 0)
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+            CGEvent.tapEnable(tap: t, enable: true)
+            CFRunLoopRun()
+        }
+        thread.name = "yakeng.eventtap"
+        thread.qualityOfService = .userInteractive
+        thread.start()
+        startFocusMonitor()
         return true
+    }
+
+    // MARK: - Theo dõi app/ô đang focus (chạy nền, tap chỉ đọc kết quả đã cache)
+
+    private let monitorQueue = DispatchQueue(label: "yakeng.focus-monitor", qos: .utility)
+    private var monitorTimer: DispatchSourceTimer?
+    /// Bundle ID của app phía trước và việc con trỏ có ở giao diện trình duyệt (ngoài trang web) không.
+    private(set) var frontBundleID = ""
+    private(set) var browserChromeFocused = false
+
+    private func startFocusMonitor() {
+        let timer = DispatchSource.makeTimerSource(queue: monitorQueue)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(250))
+        timer.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            let id = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+            self.frontBundleID = id
+            if VietInput.browserBundleIDs.contains(id) {
+                self.browserChromeFocused = VietInput.isBrowserChromeFocused()
+            } else {
+                self.browserChromeFocused = false
+            }
+        }
+        timer.resume()
+        monitorTimer = timer
     }
 
     var isRunning: Bool { tap != nil }
@@ -80,7 +114,8 @@ final class EventTap {
 
         case .flagsChanged:
             if switcher.isVisible, !cfg.altTabHotkey.modifiersHeld(in: flags) {
-                if cfg.altTabSticky { switcher.detach() } else { switcher.commit() }
+                let sticky = cfg.altTabSticky
+                DispatchQueue.main.async { if sticky { self.switcher.detach() } else { self.switcher.commit() } }
             }
             return Unmanaged.passUnretained(event)
 
@@ -92,9 +127,11 @@ final class EventTap {
 
             // Bật/tắt tiếng Việt
             if cfg.vietEnabled, cfg.vietToggleHotkey.matches(keyCode: keyCode, flags: flags) {
-                settings.data.vietActive.toggle()
                 viet.reset()
-                onVietToggled?()
+                DispatchQueue.main.async {
+                    self.settings.data.vietActive.toggle()
+                    self.onVietToggled?()
+                }
                 return nil
             }
 
@@ -139,7 +176,7 @@ final class EventTap {
                 viet.method = cfg.vietMethod
                 viet.modernTone = cfg.vietModernTone
                 viet.browserFix = cfg.vietBrowserFix
-                viet.spellCheck = cfg.vietSpellCheck
+                viet.spellCheck = cfg.vietSpellMode
                 if viet.handle(keyCode: keyCode, flags: flags, event: event) {
                     return nil
                 }
@@ -152,8 +189,7 @@ final class EventTap {
     }
 
     private func isExcludedAppActive() -> Bool {
-        guard let id = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return false }
-        return settings.excludedBundleIDs.contains(id)
+        settings.excludedBundleIDs.contains(frontBundleID)
     }
 
     // MARK: - Gửi phím giả lập
@@ -198,10 +234,8 @@ final class EventTap {
         post(up)
     }
 
-    /// Bundle ID của app đang ở trước.
-    static var frontmostBundleID: String {
-        NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
-    }
+    /// Bundle ID của app đang ở trước (đã cache, không gọi NSWorkspace trong tap).
+    static var frontmostBundleID: String { shared.frontBundleID }
 }
 
 private func yakengTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {

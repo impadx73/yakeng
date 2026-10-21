@@ -170,8 +170,9 @@ def letter(c):
     return "đ" if (c.base == "d" and c.mod == 1) else c.base
 
 
-def is_valid_syllable(chars, tone):
-    """Kiểm tra chính tả đơn giản: phụ âm đầu + nguyên âm + phụ âm cuối phải hợp lệ."""
+def is_valid_syllable(chars, tone, strict=True):
+    """Kiểm tra chính tả: strict = phụ âm đầu + nguyên âm + phụ âm cuối phải hợp lệ;
+    không strict (mức nhẹ) = chỉ cần phụ âm đầu hợp lệ (chặn files, jazz, wifi… nhưng cho phép đk, đc, ko)."""
     if not chars:
         return True
     letters = [letter(c) for c in chars]
@@ -190,7 +191,13 @@ def is_valid_syllable(chars, tone):
         initial, cluster = "qu", cluster[1:]
     elif initial == "g" and len(cluster) > 1 and cluster[0] == "i":
         initial, cluster = "gi", cluster[1:]
-    if initial not in INITIALS or final not in FINALS:
+    if not strict:
+        # mức nhẹ: chỉ cần phần đầu không phải phụ âm lạ (f, j, w, z, fl, bl…)
+        head = initial if cluster else initial[:1]
+        return head in INITIALS or (not cluster and len(initial) > 1 and initial[:2] in INITIALS)
+    if initial not in INITIALS:
+        return False
+    if final not in FINALS:
         return False
     if not cluster:
         return final == ""               # đang gõ dở, mới có phụ âm đầu: "đ", "ng", "tr", "qu", "gi"
@@ -201,7 +208,7 @@ def is_valid_syllable(chars, tone):
     return True
 
 
-def compose(raw, method="telex", modern=False, spellcheck=True):
+def compose(raw, method="telex", modern=False, spellcheck="lenient"):
     """raw: list[RawKey] hoặc str. Trả về (chuỗi hiển thị, phím cuối có huỷ dấu không)."""
     keys = [k if isinstance(k, RawKey) else RawKey(k) for k in raw]
     chars, tone = [], 0
@@ -241,13 +248,13 @@ def compose(raw, method="telex", modern=False, spellcheck=True):
                     reverted = True
         if not handled:
             chars.append(VChar(lower, 0, upper))
-    if spellcheck and not reverted and not is_valid_syllable(chars, tone):
+    if spellcheck != "off" and not reverted and not is_valid_syllable(chars, tone, strict=(spellcheck == "strict")):
         return "".join(k.ch for k in keys), reverted
     return render(chars, tone, modern), reverted
 
 
 # Mô phỏng VietInput.handle: gõ từng phím, trả về chuỗi hiển thị cuối cùng
-def type_word(keys, method="telex", modern=False):
+def type_word(keys, method="telex", modern=False, spellcheck="lenient"):
     raw, displayed = [], ""
     for k in keys:
         if k == "\b":
@@ -256,7 +263,7 @@ def type_word(keys, method="telex", modern=False):
                 raw = [RawKey(c) for c in displayed]
             continue
         candidate = raw + [RawKey(k)]
-        new, reverted = compose(candidate, method, modern)
+        new, reverted = compose(candidate, method, modern, spellcheck)
         # Huỷ dấu: chuỗi hiển thị trở thành chữ thuần, không khôi phục phím cũ nữa
         raw = [RawKey(c, literal=True) for c in new] if reverted else candidate
         displayed = new
@@ -276,8 +283,8 @@ if __name__ == "__main__":
         ("tooi", "tôi"), ("xin", "xin"), ("chaof", "chào"), ("uwowts", "ướt"),
         ("quyeens", "quyến"), ("thuowngf", "thường"), ("files", "files"), ("and", "and"), ("ass", "as"),
         ("gif", "gì"), ("giuwx", "giữ"), ("gieeng", "giêng"), ("ngoawnf", "ngoằn"), ("ddaams", "đấm"),
-        ("thuyeetj", "thuyệt"), ("khoong", "không"), ("nghieeng", "nghiêng"), ("test", "tét"),
-        ("ddeens", "đến"), ("dd", "đ"), ("ddd", "dd"), ("ngh", "ngh"), ("qu", "qu"), ("DD", "Đ"), ("gooogle", "google"), ("google", "google"), ("gooo", "goo"), ("gooof", "goof"),
+        ("thuyeetj", "thuyệt"), ("khoong", "không"), ("nghieeng", "nghiêng"), ("test", "tét"), ("ddk", "đk"), ("ddc", "đc"), ("ddawng", "đăng"), ("jazz", "jazz"), ("ko", "ko"), ("ngta", "ngta"),
+        ("ddeens", "đến"), ("dd", "đ"), ("ddd", "dd"), ("ngh", "ngh"), ("qu", "qu"), ("DD", "Đ"), ("gooogle", "google"), ("google", "gôgle"), ("gooo", "goo"), ("gooof", "goof"),
         ("tooo", "too"), ("ddd", "dd"), ("dddd", "ddd"), ("wwwf", "wwf"), ("ngoanf", "ngoàn"), ("rooif", "rồi"), ("owi", "ơi"), ("uwf", "ừ"), ("mwowif", "mười"),
     ]
     bad = 0
@@ -291,5 +298,9 @@ if __name__ == "__main__":
     assert type_word("traanf\bn") == "trần", type_word("traanf\bn")
     assert type_word("traa\b") == "tr"
     assert type_word("xoas\b") == "xó"
+    assert type_word("google", spellcheck="strict") == "google"
+    assert type_word("wifi", spellcheck="strict") == "wifi"
+    assert type_word("ddk", spellcheck="strict") == "ddk"
+    assert type_word("files", spellcheck="off") == "filé"
     print("VNI:", type_word("tie61ng", "vni"), type_word("d9u7o72ng", "vni"), type_word("ho5c", "vni"))
     print(f"{len(cases) - bad}/{len(cases)} ok")

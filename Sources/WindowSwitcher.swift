@@ -50,22 +50,25 @@ final class WindowSwitcher {
         }
     }
 
+    private let axQueue = DispatchQueue(label: "yakeng.mru-ax", qos: .utility)
+
     /// Ghi nhận cửa sổ đang có focus của app phía trước vào đầu danh sách MRU.
+    /// Truy vấn Accessibility chạy ở luồng nền (app khác có thể trả lời chậm), kết quả đưa về luồng chính.
     func noteFocusedWindow(after delay: TimeInterval) {
-        let work = { [weak self] in
+        axQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self = self, !self.isVisible,
                   let app = NSWorkspace.shared.frontmostApplication,
                   app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
             let axApp = AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetMessagingTimeout(axApp, 0.3)
             var value: CFTypeRef?
             guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &value) == .success,
                   let win = value else { return }
             let ax = win as! AXUIElement
             var wid: CGWindowID = 0
             guard _AXUIElementGetWindow(ax, &wid) == .success, wid != 0 else { return }
-            self.touch(wid)
+            DispatchQueue.main.async { self.touch(wid) }
         }
-        if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work) } else { work() }
     }
 
     private func touch(_ id: CGWindowID) {
