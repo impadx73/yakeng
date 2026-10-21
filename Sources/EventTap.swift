@@ -106,6 +106,9 @@ final class EventTap {
         let cfg = settings.data
         let flags = event.flags
 
+        if type == .keyDown { setHeld(event.getIntegerValueField(.keyboardEventKeycode), true) }
+        if type == .keyUp { setHeld(event.getIntegerValueField(.keyboardEventKeycode), false) }
+
         switch type {
         case .leftMouseDown:
             viet.reset()
@@ -222,10 +225,30 @@ final class EventTap {
         for ch in s { sendCharacter(ch) }
     }
 
+    /// Các phím vật lý đang được giữ (cập nhật trong tap).
+    private var heldKeys = Set<Int64>()
+    private let heldKeysLock = NSLock()
+
+    fileprivate func setHeld(_ keyCode: Int64, _ down: Bool) {
+        heldKeysLock.lock(); defer { heldKeysLock.unlock() }
+        if down { heldKeys.insert(keyCode) } else { heldKeys.remove(keyCode) }
+    }
+
+    /// Mã phím cho ký tự giả lập. Phải là một phím chữ cái thật (Telegram/Qt bỏ qua mã phím lạ),
+    /// nhưng KHÔNG được là phím người dùng đang giữ: nếu ngón tay còn giữ phím A (gõ nhanh "là", "đăng")
+    /// mà ký tự thay thế cũng mang mã phím A, macOS coi đó là phím lặp và chặn (press-and-hold) → mất chữ.
+    private static let letterKeyCodes: [Int64] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17]
+    static func freeKeyCode() -> CGKeyCode {
+        shared.heldKeysLock.lock(); defer { shared.heldKeysLock.unlock() }
+        for k in letterKeyCodes where !shared.heldKeys.contains(k) { return CGKeyCode(k) }
+        return 0
+    }
+
     static func sendCharacter(_ ch: Character) {
         var units = Array(String(ch).utf16)
-        let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true)
-        let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
+        let key = freeKeyCode()
+        let down = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: true)
+        let up = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: false)
         down?.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
         up?.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
         down?.flags = .maskNonCoalesced
