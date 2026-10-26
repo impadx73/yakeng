@@ -9,6 +9,15 @@ Bộ công cụ bàn phím "kiểu Windows" cho macOS, chạy nền trên thanh 
 | **Lịch sử clipboard** | ⇧⌘S | Bảng mọi thứ đã sao chép (chữ + ảnh). Bấm mục để dán. Nút **Chụp màn hình** kéo chọn vùng như Win+Shift+S. |
 | **Gõ tiếng Việt** | ⌥Z bật/tắt | Telex hoặc VNI, kiểu dấu cũ/mới. Thanh menu hiện **VI / EN**. |
 
+## Tải về (không cần build)
+
+**[Tải Yakeng.dmg](https://github.com/impadx73/yakeng/raw/main/dist/Yakeng.dmg)** – bản 2.12, Apple Silicon, macOS 12+.
+
+1. Mở `Yakeng.dmg`, kéo **Yakeng** vào **Applications**.
+2. Lần đầu mở: nhấp chuột phải vào app → **Open** (app ký bằng chứng chỉ tự tạo, chưa notarize).
+3. Cấp quyền **Accessibility** (bắt buộc) và **Screen Recording** (nếu muốn ảnh thu nhỏ Alt+Tab).
+4. System Settings → Keyboard → Input Sources: để **ABC**, không bật "Vietnamese – Simple Telex" của Apple (gõ sẽ bị chồng).
+
 ## Build
 
 Cần Xcode Command Line Tools (`xcode-select --install`), macOS 12+.
