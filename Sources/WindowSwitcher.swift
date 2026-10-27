@@ -19,7 +19,6 @@ final class SwitcherModel: ObservableObject {
     @Published var index = 0
     @Published var detached = false        // đã thả ⌥, bảng vẫn mở
     var onSelect: ((Int) -> Void)?
-    var onHover: ((Int) -> Void)?
 }
 
 /// Bảng chuyển cửa sổ kiểu Windows: giữ ⌥, bấm ⇥ để duyệt, thả ⌥ để chọn.
@@ -39,7 +38,6 @@ final class WindowSwitcher {
             self.model.index = i
             self.commit()
         }
-        model.onHover = { [weak self] i in self?.model.index = i }
 
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
@@ -275,8 +273,8 @@ struct SwitcherView: View {
                 ForEach(Array(model.windows.enumerated()), id: \.offset) { pair in
                     let i = pair.offset
                     let w = pair.element
+                    // Di chuột chỉ tô sáng nhẹ, KHÔNG đổi lựa chọn; chỉ bấm chuột mới chọn
                     SwitcherTile(window: w, selected: i == model.index, width: cellW, height: cellH)
-                        .onHover { if $0 { model.onHover?(i) } }
                         .onTapGesture { model.onSelect?(i) }
                 }
             }
@@ -297,6 +295,7 @@ struct SwitcherTile: View {
     let selected: Bool
     let width: CGFloat
     let height: CGFloat
+    @ObservedObject private var hover = HoverState()
 
     var body: some View {
         VStack(spacing: 6) {
@@ -326,8 +325,9 @@ struct SwitcherTile: View {
         .padding(8)
         .frame(width: width, height: height)
         .background(RoundedRectangle(cornerRadius: 12)
-            .fill(selected ? Color.accentColor.opacity(0.7) : Color.white.opacity(0.06)))
+            .fill(selected ? Color.accentColor.opacity(0.7) : (hover.on ? Color.white.opacity(0.16) : Color.white.opacity(0.06))))
         .contentShape(Rectangle())
+        .onHover { hover.on = $0 }
     }
 }
 

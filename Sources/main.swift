@@ -2,6 +2,7 @@
 // Ctrl→Cmd · Alt+Tab · Lịch sử clipboard & chụp màn hình · Gõ tiếng Việt
 import Cocoa
 import SwiftUI
+import Carbon.HIToolbox
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
@@ -13,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         tap.onVietToggled = { [weak self] in self?.refreshStatusTitle() }
         tap.clipboard.start()
+        startSecureInputMonitor()
 
         // Quyền Accessibility
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
@@ -44,12 +46,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
     }
 
+    private var secureInputTimer: Timer?
+    private var secureInputActive = false
+
+    /// macOS bật "Secure Input" khi con trỏ ở ô mật khẩu: không app nào (kể cả Yakeng) nhận được phím,
+    /// nên Ctrl→Cmd và gõ tiếng Việt tạm ngưng. Hiện 🔒 để người dùng biết dùng ⌘V thay vì Ctrl+V.
+    private func startSecureInputMonitor() {
+        secureInputTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            let now = IsSecureEventInputEnabled()
+            if now != self.secureInputActive {
+                self.secureInputActive = now
+                self.refreshStatusTitle()
+            }
+        }
+    }
+
     private func refreshStatusTitle() {
         guard let b = statusItem.button else { return }
         let cfg = Settings.shared.data
         if !tap.isRunning {
             b.title = "Y!"
             b.toolTip = "Yakeng: chưa có quyền Accessibility"
+        } else if secureInputActive {
+            b.title = "🔒"
+            b.toolTip = "Ô mật khẩu (Secure Input): macOS chặn mọi bộ gõ – dùng ⌘V để dán"
         } else if cfg.vietEnabled {
             b.title = cfg.vietActive ? "VI" : "EN"
             b.toolTip = "Yakeng – gõ tiếng Việt: \(cfg.vietActive ? "bật" : "tắt")"
