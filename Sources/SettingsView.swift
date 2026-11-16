@@ -139,7 +139,7 @@ struct GeneralTab: View {
                 .padding(6)
             }
             Spacer()
-            Text("Yakeng 2.15 – mã nguồn: github.com/impadx73/yakeng")
+            Text("Yakeng 2.16 – mã nguồn: github.com/impadx73/yakeng")
                 .font(.caption).foregroundColor(.secondary)
         }
     }
@@ -291,7 +291,7 @@ struct NotesTab: View {
                 ForEach(NoteColors.all) { c in Text(c.label).tag(c.name) }
             }
             .frame(width: 220)
-            Text("Mỗi ghi chú là một cửa sổ nhỏ: kéo thanh màu phía trên để di chuyển, kéo cạnh để đổi cỡ. Nhấp đúp vào tiêu đề (hoặc chọn \"Đặt tiêu đề\" trong nút bảng màu) để đặt tên; chưa đặt thì dùng dòng đầu. Trên thanh có nút đổi màu, tạo mới, ghim nổi, thu gọn thành một thanh và xoá. Nội dung tự lưu, mở lại khi khởi động.")
+            Text("Mỗi ghi chú là một cửa sổ nhỏ: kéo thanh màu phía trên để di chuyển, kéo cạnh để đổi cỡ. Nhấp đúp thanh trên để thu gọn thành một thanh / mở rộng lại. Đặt tiêu đề trong nút bảng màu → \"Đặt tiêu đề…\" (chưa đặt thì dùng dòng đầu). Trên thanh còn có nút tạo mới, ghim nổi, thu gọn và xoá. Nội dung tự lưu, mở lại khi khởi động.")
                 .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
             Button("Tạo ghi chú ngay") { EventTap.shared.notes.createNote() }
             Spacer()

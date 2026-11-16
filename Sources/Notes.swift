@@ -275,10 +275,11 @@ struct NoteView: View {
 
                 NoteTitleField(noteID: noteID,
                                title: n.name,
-                               placeholder: n.firstLine.isEmpty ? "Tiêu đề (nhấp đúp)" : n.firstLine,
+                               placeholder: n.firstLine.isEmpty ? "Ghi chú" : n.firstLine,
                                onCommit: { newName in
                                    manager.update(noteID) { $0.name = newName.trimmingCharacters(in: .whitespaces) }
-                               })
+                               },
+                               onDoubleClick: { manager.update(noteID) { $0.collapsed.toggle() } })
                     .frame(maxWidth: .infinity, minHeight: 18, maxHeight: 18)
 
                 Button(action: { manager.createNote() }) { Image(systemName: "plus") }
@@ -299,7 +300,8 @@ struct NoteView: View {
             .foregroundColor(.black.opacity(0.6))
             .padding(.horizontal, 8)
             .frame(height: NotesManager.barHeight)
-            .background(WindowDragArea())          // vùng trống của thanh: kéo để di chuyển
+            // vùng trống của thanh: kéo để di chuyển, nhấp đúp để thu gọn/mở rộng
+            .background(WindowDragArea(onDoubleClick: { manager.update(noteID) { $0.collapsed.toggle() } }))
             .background(Color(nsColor: NoteColors.bar(n.color)))
 
             if !n.collapsed {
@@ -380,24 +382,29 @@ struct NoteTextView: NSViewRepresentable {
 
 /// NSHostingView không cho kéo cửa sổ theo nền, nên thanh trên dùng NSView riêng gọi performDrag.
 struct WindowDragArea: NSViewRepresentable {
+    var onDoubleClick: () -> Void
     func makeNSView(context: Context) -> DragHandleView { DragHandleView() }
-    func updateNSView(_ v: DragHandleView, context: Context) {}
+    func updateNSView(_ v: DragHandleView, context: Context) { v.onDoubleClick = onDoubleClick }
 }
 
 final class DragHandleView: NSView {
+    var onDoubleClick: (() -> Void)?
     override var mouseDownCanMoveWindow: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 { onDoubleClick?(); return }
         window?.performDrag(with: event)
     }
 }
 
-/// Ô tiêu đề trên thanh ghi chú: kéo = di chuyển cửa sổ, nhấp đúp = đổi tên, Enter/nhấp ra ngoài = lưu, Esc = huỷ.
+/// Ô tiêu đề trên thanh ghi chú: kéo = di chuyển, nhấp đúp = thu gọn/mở rộng.
+/// Đổi tên qua menu bảng màu "Đặt tiêu đề…": Enter/nhấp ra ngoài = lưu, Esc = huỷ.
 struct NoteTitleField: NSViewRepresentable {
     let noteID: UUID
     var title: String
     var placeholder: String
     var onCommit: (String) -> Void
+    var onDoubleClick: () -> Void
 
     func makeNSView(context: Context) -> NoteTitleNSField {
         let f = NoteTitleNSField(noteID: noteID)
@@ -407,6 +414,7 @@ struct NoteTitleField: NSViewRepresentable {
 
     func updateNSView(_ f: NoteTitleNSField, context: Context) {
         f.onCommit = onCommit
+        f.onDoubleClick = onDoubleClick
         if f.currentEditor() == nil, f.stringValue != title { f.stringValue = title }
         if f.placeholderString != placeholder {
             f.placeholderString = placeholder
@@ -422,6 +430,7 @@ final class NoteTitleNSField: NSTextField, NSTextFieldDelegate {
     static let titleFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
     let noteID: UUID
     var onCommit: ((String) -> Void)?
+    var onDoubleClick: (() -> Void)?
     private var original = ""
     private var cancelled = false
     private var observer: NSObjectProtocol?
@@ -442,7 +451,7 @@ final class NoteTitleNSField: NSTextField, NSTextFieldDelegate {
         cell?.wraps = false
         cell?.isScrollable = true
         delegate = self
-        toolTip = "Kéo để di chuyển · nhấp đúp để đặt tiêu đề"
+        toolTip = "Kéo để di chuyển · nhấp đúp để thu gọn/mở rộng"
         setContentHuggingPriority(.defaultLow, for: .horizontal)
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         observer = NotificationCenter.default.addObserver(forName: .yakengEditNoteTitle, object: nil, queue: .main) { [weak self] n in
@@ -458,7 +467,7 @@ final class NoteTitleNSField: NSTextField, NSTextFieldDelegate {
 
     override func mouseDown(with event: NSEvent) {
         if currentEditor() != nil { super.mouseDown(with: event); return }
-        if event.clickCount >= 2 { beginEditing(); return }
+        if event.clickCount == 2 { onDoubleClick?(); return }
         window?.performDrag(with: event)
     }
 
