@@ -3,26 +3,78 @@ import SwiftUI
 import Combine
 import ServiceManagement
 
+enum SettingsPage: String, CaseIterable, Identifiable {
+    case general, ctrl, altTab, clipboard, viet, notes
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .general: return "Chung"
+        case .ctrl: return "Phím Ctrl"
+        case .altTab: return "Alt+Tab"
+        case .clipboard: return "Clipboard"
+        case .viet: return "Tiếng Việt"
+        case .notes: return "Ghi chú"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .general: return "gearshape"
+        case .ctrl: return "keyboard"
+        case .altTab: return "macwindow.on.rectangle"
+        case .clipboard: return "doc.on.clipboard"
+        case .viet: return "character.cursor.ibeam"
+        case .notes: return "note.text"
+        }
+    }
+}
+
+final class SettingsNav: ObservableObject {
+    static let shared = SettingsNav()
+    @Published var page: SettingsPage = .general
+}
+
+/// Thanh tab tự vẽ: luôn hiện đủ mọi tab (TabView trên macOS mới gom tab thừa vào nút »).
 struct SettingsView: View {
     @ObservedObject var settings = Settings.shared
+    @ObservedObject var nav = SettingsNav.shared
 
     var body: some View {
-        TabView {
-            GeneralTab(settings: settings)
-                .tabItem { Label("Chung", systemImage: "gearshape") }
-            CtrlTab(settings: settings)
-                .tabItem { Label("Phím Ctrl", systemImage: "keyboard") }
-            AltTabTab(settings: settings)
-                .tabItem { Label("Alt+Tab", systemImage: "macwindow.on.rectangle") }
-            ClipboardTab(settings: settings)
-                .tabItem { Label("Clipboard", systemImage: "doc.on.clipboard") }
-            VietTab(settings: settings)
-                .tabItem { Label("Tiếng Việt", systemImage: "character.cursor.ibeam") }
-            NotesTab(settings: settings)
-                .tabItem { Label("Ghi chú", systemImage: "note.text") }
+        VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                ForEach(SettingsPage.allCases) { p in
+                    let selected = nav.page == p
+                    Button(action: { nav.page = p }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: p.icon).font(.system(size: 18)).frame(height: 22)
+                            Text(p.title).font(.system(size: 11, weight: selected ? .semibold : .regular))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .foregroundColor(selected ? .accentColor : .primary)
+                        .background(RoundedRectangle(cornerRadius: 8)
+                            .fill(selected ? Color.accentColor.opacity(0.16) : Color.clear))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            Divider()
+            Group {
+                switch nav.page {
+                case .general: GeneralTab(settings: settings)
+                case .ctrl: CtrlTab(settings: settings)
+                case .altTab: AltTabTab(settings: settings)
+                case .clipboard: ClipboardTab(settings: settings)
+                case .viet: VietTab(settings: settings)
+                case .notes: NotesTab(settings: settings)
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .padding(16)
-        .frame(width: 560, height: 460)
+        .frame(width: 620, height: 500)
     }
 }
 
@@ -87,7 +139,7 @@ struct GeneralTab: View {
                 .padding(6)
             }
             Spacer()
-            Text("Yakeng 2.14 – mã nguồn: github.com/impadx73/yakeng")
+            Text("Yakeng 2.15 – mã nguồn: github.com/impadx73/yakeng")
                 .font(.caption).foregroundColor(.secondary)
         }
     }
@@ -239,7 +291,7 @@ struct NotesTab: View {
                 ForEach(NoteColors.all) { c in Text(c.label).tag(c.name) }
             }
             .frame(width: 220)
-            Text("Mỗi ghi chú là một cửa sổ nhỏ: kéo thanh màu để di chuyển, kéo cạnh để đổi cỡ. Trên thanh có nút đổi màu, tạo mới, ghim nổi, thu gọn thành một thanh (hiện dòng đầu làm tiêu đề) và xoá. Nội dung tự lưu, mở lại khi khởi động.")
+            Text("Mỗi ghi chú là một cửa sổ nhỏ: kéo thanh màu phía trên để di chuyển, kéo cạnh để đổi cỡ. Nhấp đúp vào tiêu đề (hoặc chọn \"Đặt tiêu đề\" trong nút bảng màu) để đặt tên; chưa đặt thì dùng dòng đầu. Trên thanh có nút đổi màu, tạo mới, ghim nổi, thu gọn thành một thanh và xoá. Nội dung tự lưu, mở lại khi khởi động.")
                 .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
             Button("Tạo ghi chú ngay") { EventTap.shared.notes.createNote() }
             Spacer()

@@ -6,6 +6,7 @@ import Combine
 
 struct Note: Codable, Identifiable, Equatable {
     var id = UUID()
+    var name = ""               // tiêu đề người dùng đặt
     var text = ""
     var color = "yellow"
     var x: Double = 200, y: Double = 300, w: Double = 280, h: Double = 220
@@ -13,16 +14,43 @@ struct Note: Codable, Identifiable, Equatable {
     var pinned = true           // luôn nổi trên cùng
     var createdAt = Date()
 
+    init() {}
+
+    /// Đọc khoan dung: ghi chú lưu từ bản cũ (chưa có "name") vẫn mở được
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        color = try c.decodeIfPresent(String.self, forKey: .color) ?? "yellow"
+        x = try c.decodeIfPresent(Double.self, forKey: .x) ?? 200
+        y = try c.decodeIfPresent(Double.self, forKey: .y) ?? 300
+        w = try c.decodeIfPresent(Double.self, forKey: .w) ?? 280
+        h = try c.decodeIfPresent(Double.self, forKey: .h) ?? 220
+        collapsed = try c.decodeIfPresent(Bool.self, forKey: .collapsed) ?? false
+        pinned = try c.decodeIfPresent(Bool.self, forKey: .pinned) ?? true
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+    }
+
     var frame: NSRect {
         get { NSRect(x: x, y: y, width: w, height: h) }
         set { x = newValue.minX; y = newValue.minY; w = newValue.width; h = newValue.height }
     }
-    /// Dòng đầu, dùng làm tiêu đề khi thu gọn
-    var title: String {
+    /// Dòng đầu của nội dung
+    var firstLine: String {
         let first = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-        let t = first.trimmingCharacters(in: .whitespaces)
-        return t.isEmpty ? "Ghi chú" : t
+        return first.trimmingCharacters(in: .whitespaces)
     }
+    /// Tiêu đề hiển thị: tên đã đặt, nếu chưa có thì dòng đầu
+    var title: String {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        if !n.isEmpty { return n }
+        return firstLine.isEmpty ? "Ghi chú" : firstLine
+    }
+}
+
+extension Notification.Name {
+    static let yakengEditNoteTitle = Notification.Name("yakeng.editNoteTitle")
 }
 
 struct NoteColor: Identifiable {
@@ -227,9 +255,13 @@ struct NoteView: View {
     var body: some View {
         let n = note
         VStack(spacing: 0) {
-            // Thanh tiêu đề: kéo để di chuyển, nút chức năng
+            // Thanh tiêu đề: kéo để di chuyển, nhấp đúp tiêu đề để đổi tên, nút chức năng
             HStack(spacing: 6) {
                 Menu {
+                    Button("Đặt tiêu đề…") {
+                        NotificationCenter.default.post(name: .yakengEditNoteTitle, object: noteID)
+                    }
+                    Divider()
                     ForEach(NoteColors.all) { c in
                         Button(c.label) { manager.update(noteID) { $0.color = c.name } }
                     }
@@ -239,13 +271,15 @@ struct NoteView: View {
                         .frame(width: 18, height: 18)
                 }
                 .menuStyle(.borderlessButton).frame(width: 22)
-                .help("Đổi màu")
+                .help("Đổi màu, đặt tiêu đề")
 
-                if n.collapsed {
-                    Text(n.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                        .foregroundColor(.black.opacity(0.75))
-                }
-                Spacer(minLength: 0)
+                NoteTitleField(noteID: noteID,
+                               title: n.name,
+                               placeholder: n.firstLine.isEmpty ? "Tiêu đề (nhấp đúp)" : n.firstLine,
+                               onCommit: { newName in
+                                   manager.update(noteID) { $0.name = newName.trimmingCharacters(in: .whitespaces) }
+                               })
+                    .frame(maxWidth: .infinity, minHeight: 18, maxHeight: 18)
 
                 Button(action: { manager.createNote() }) { Image(systemName: "plus") }
                     .help("Ghi chú mới")
@@ -265,6 +299,7 @@ struct NoteView: View {
             .foregroundColor(.black.opacity(0.6))
             .padding(.horizontal, 8)
             .frame(height: NotesManager.barHeight)
+            .background(WindowDragArea())          // vùng trống của thanh: kéo để di chuyển
             .background(Color(nsColor: NoteColors.bar(n.color)))
 
             if !n.collapsed {
@@ -338,5 +373,124 @@ struct NoteTextView: NSViewRepresentable {
             guard let tv = notification.object as? NSTextView else { return }
             parent.text = tv.string
         }
+    }
+}
+
+// MARK: - Kéo cửa sổ & tiêu đề
+
+/// NSHostingView không cho kéo cửa sổ theo nền, nên thanh trên dùng NSView riêng gọi performDrag.
+struct WindowDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> DragHandleView { DragHandleView() }
+    func updateNSView(_ v: DragHandleView, context: Context) {}
+}
+
+final class DragHandleView: NSView {
+    override var mouseDownCanMoveWindow: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+    }
+}
+
+/// Ô tiêu đề trên thanh ghi chú: kéo = di chuyển cửa sổ, nhấp đúp = đổi tên, Enter/nhấp ra ngoài = lưu, Esc = huỷ.
+struct NoteTitleField: NSViewRepresentable {
+    let noteID: UUID
+    var title: String
+    var placeholder: String
+    var onCommit: (String) -> Void
+
+    func makeNSView(context: Context) -> NoteTitleNSField {
+        let f = NoteTitleNSField(noteID: noteID)
+        f.stringValue = title
+        return f
+    }
+
+    func updateNSView(_ f: NoteTitleNSField, context: Context) {
+        f.onCommit = onCommit
+        if f.currentEditor() == nil, f.stringValue != title { f.stringValue = title }
+        if f.placeholderString != placeholder {
+            f.placeholderString = placeholder
+            f.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
+                .foregroundColor: NSColor.black.withAlphaComponent(0.45),
+                .font: NoteTitleNSField.titleFont,
+            ])
+        }
+    }
+}
+
+final class NoteTitleNSField: NSTextField, NSTextFieldDelegate {
+    static let titleFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
+    let noteID: UUID
+    var onCommit: ((String) -> Void)?
+    private var original = ""
+    private var cancelled = false
+    private var observer: NSObjectProtocol?
+
+    init(noteID: UUID) {
+        self.noteID = noteID
+        super.init(frame: .zero)
+        isEditable = false
+        isSelectable = false
+        isBordered = false
+        isBezeled = false
+        drawsBackground = false
+        focusRingType = .none
+        font = NoteTitleNSField.titleFont
+        textColor = NSColor.black.withAlphaComponent(0.8)
+        lineBreakMode = .byTruncatingTail
+        cell?.usesSingleLineMode = true
+        cell?.wraps = false
+        cell?.isScrollable = true
+        delegate = self
+        toolTip = "Kéo để di chuyển · nhấp đúp để đặt tiêu đề"
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        observer = NotificationCenter.default.addObserver(forName: .yakengEditNoteTitle, object: nil, queue: .main) { [weak self] n in
+            guard let self = self, (n.object as? UUID) == self.noteID else { return }
+            self.beginEditing()
+        }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    deinit { if let o = observer { NotificationCenter.default.removeObserver(o) } }
+
+    override var mouseDownCanMoveWindow: Bool { currentEditor() == nil }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        if currentEditor() != nil { super.mouseDown(with: event); return }
+        if event.clickCount >= 2 { beginEditing(); return }
+        window?.performDrag(with: event)
+    }
+
+    func beginEditing() {
+        guard currentEditor() == nil, let w = window else { return }
+        original = stringValue
+        cancelled = false
+        isEditable = true
+        isSelectable = true
+        w.makeKeyAndOrderFront(nil)
+        if w.makeFirstResponder(self) { currentEditor()?.selectAll(nil) }
+    }
+
+    // Esc huỷ, Enter lưu
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
+        if sel == #selector(NSResponder.cancelOperation(_:)) {
+            cancelled = true
+            stringValue = original
+            window?.makeFirstResponder(nil)
+            return true
+        }
+        if sel == #selector(NSResponder.insertNewline(_:)) {
+            window?.makeFirstResponder(nil)
+            return true
+        }
+        return false
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        isEditable = false
+        isSelectable = false
+        if !cancelled { onCommit?(stringValue) }
+        cancelled = false
     }
 }

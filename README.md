@@ -8,11 +8,11 @@ Bộ công cụ bàn phím "kiểu Windows" cho macOS, chạy nền trên thanh 
 | **Alt + Tab** | ⌥⇥ (⇧ để lùi) | Bảng chuyển *từng cửa sổ* như Windows (⌘⇥ của macOS chỉ chuyển app). Thả ⌥ để chọn, Esc huỷ. |
 | **Lịch sử clipboard** | ⇧⌘S | Bảng mọi thứ đã sao chép (chữ + ảnh). Bấm mục để dán. Nút **Chụp màn hình** kéo chọn vùng như Win+Shift+S. |
 | **Gõ tiếng Việt** | ⌥Z bật/tắt | Telex hoặc VNI, kiểu dấu cũ/mới. Thanh menu hiện **VI / EN**. |
-| **Ghi chú dán** | ⌃⌥N mới · ⌃⌥H ẩn/hiện | Sticky notes: cửa sổ nhỏ nhiều màu, luôn nổi trên cùng, thu gọn thành một thanh, tự lưu. |
+| **Ghi chú dán** | ⌃⌥N mới · ⌃⌥H ẩn/hiện | Sticky notes: cửa sổ nhỏ nhiều màu, luôn nổi trên cùng, thu gọn thành một thanh, đặt tiêu đề (nhấp đúp), tự lưu. |
 
 ## Tải về (không cần build)
 
-**[Tải Yakeng.dmg](https://github.com/impadx73/yakeng/raw/main/dist/Yakeng.dmg)** – bản 2.14, Apple Silicon, macOS 12+.
+**[Tải Yakeng.dmg](https://github.com/impadx73/yakeng/raw/main/dist/Yakeng.dmg)** – bản 2.15, Apple Silicon, macOS 12+.
 
 1. Mở `Yakeng.dmg`, kéo **Yakeng** vào **Applications**.
 2. Lần đầu mở: nhấp chuột phải vào app → **Open** (app ký bằng chứng chỉ tự tạo, chưa notarize).
