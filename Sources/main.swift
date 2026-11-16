@@ -2,6 +2,7 @@
 // Ctrl→Cmd · Alt+Tab · Lịch sử clipboard & chụp màn hình · Gõ tiếng Việt
 import Cocoa
 import SwiftUI
+import Combine
 import Carbon.HIToolbox
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -9,11 +10,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var permissionTimer: Timer?
     private let tap = EventTap.shared
+    private var settingsSink: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
         tap.onVietToggled = { [weak self] in self?.refreshStatusTitle() }
         tap.clipboard.start()
+        if Settings.shared.data.notesEnabled { tap.notes.restore() }
+        // Đổi phím tắt trong Cài đặt → cập nhật việc tắt/bật ⌘⇥ gốc của macOS
+        settingsSink = Settings.shared.$data
+            .map { ($0.altTabEnabled, $0.altTabHotkey) }
+            .removeDuplicates(by: { $0.0 == $1.0 && $0.1 == $1.1 })
+            .sink { [weak self] _ in self?.tap.applyNativeCmdTabPolicy() }
         startSecureInputMonitor()
 
         // Quyền Accessibility
@@ -87,6 +95,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showClipboard() { tap.clipboard.togglePanel() }
+    @objc private func newNote() { tap.notes.createNote() }
+    @objc private func toggleNotes() { tap.notes.toggleAll() }
 
     @objc func openSettings() {
         if settingsWindow == nil {
@@ -104,6 +114,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quit() { NSApp.terminate(nil) }
+
+    /// Trả lại ⌘⇥ cho macOS khi thoát (trạng thái tắt tồn tại cả sau khi app đóng)
+    func applicationWillTerminate(_ notification: Notification) {
+        EventTap.setNativeCmdTab(enabled: true)
+    }
 }
 
 extension AppDelegate: NSMenuDelegate {
@@ -126,6 +141,16 @@ extension AppDelegate: NSMenuDelegate {
             let c = NSMenuItem(title: "Lịch sử clipboard… (\(cfg.clipboardHotkey.display))", action: #selector(showClipboard), keyEquivalent: "")
             c.target = self
             menu.addItem(c)
+        }
+        if cfg.notesEnabled {
+            menu.addItem(.separator())
+            let n = NSMenuItem(title: "Ghi chú mới (\(cfg.notesNewHotkey.display))", action: #selector(newNote), keyEquivalent: "")
+            n.target = self
+            menu.addItem(n)
+            let h = NSMenuItem(title: (tap.notes.allHidden ? "Hiện ghi chú" : "Ẩn ghi chú") + " (\(cfg.notesToggleHotkey.display))", action: #selector(toggleNotes), keyEquivalent: "")
+            h.target = self
+            h.isEnabled = !tap.notes.notes.isEmpty
+            menu.addItem(h)
         }
         menu.addItem(.separator())
         let s = NSMenuItem(title: "Cài đặt…", action: #selector(openSettings), keyEquivalent: ",")

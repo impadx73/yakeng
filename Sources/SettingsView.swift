@@ -18,6 +18,8 @@ struct SettingsView: View {
                 .tabItem { Label("Clipboard", systemImage: "doc.on.clipboard") }
             VietTab(settings: settings)
                 .tabItem { Label("Tiếng Việt", systemImage: "character.cursor.ibeam") }
+            NotesTab(settings: settings)
+                .tabItem { Label("Ghi chú", systemImage: "note.text") }
         }
         .padding(16)
         .frame(width: 560, height: 460)
@@ -85,7 +87,7 @@ struct GeneralTab: View {
                 .padding(6)
             }
             Spacer()
-            Text("Yakeng 2.13 – mã nguồn: github.com/impadx73/yakeng")
+            Text("Yakeng 2.14 – mã nguồn: github.com/impadx73/yakeng")
                 .font(.caption).foregroundColor(.secondary)
         }
     }
@@ -150,6 +152,8 @@ struct AltTabTab: View {
                 Text("(giữ phím bổ trợ, bấm phím chính để duyệt, thêm ⇧ để lùi)")
                     .font(.caption).foregroundColor(.secondary)
             }
+            Text("Có thể đặt ⌘⇥: Yakeng sẽ tự tắt bộ chuyển app gốc của macOS khi đang chạy và trả lại khi thoát.")
+                .font(.caption).foregroundColor(.secondary)
             Toggle("Hiện ảnh thu nhỏ của cửa sổ (cần quyền Ghi màn hình)", isOn: $settings.data.altTabThumbnails)
             Toggle("Thả ⌥ vẫn giữ bảng mở – chọn bằng chuột, ←→ hoặc Enter", isOn: $settings.data.altTabSticky)
             Text("Giữ ⌥ và bấm ⇥ để duyệt qua *từng cửa sổ* đang mở (không phải từng app như ⌘⇥ của macOS). Có thể di chuột và bấm vào cửa sổ muốn chuyển. Thả ⌥ để chuyển sang cửa sổ được chọn, Esc để huỷ.")
@@ -215,6 +219,34 @@ struct VietTab: View {
     }
 }
 
+// MARK: - Ghi chú
+
+struct NotesTab: View {
+    @ObservedObject var settings: Settings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle("Bật ghi chú dán (sticky notes)", isOn: $settings.data.notesEnabled)
+            HStack {
+                Text("Tạo ghi chú mới:")
+                HotkeyRecorder(hotkey: $settings.data.notesNewHotkey)
+                Spacer().frame(width: 16)
+                Text("Ẩn/hiện tất cả:")
+                HotkeyRecorder(hotkey: $settings.data.notesToggleHotkey)
+            }
+            Toggle("Ghi chú mới luôn nổi trên cùng (always on top)", isOn: $settings.data.notesDefaultPinned)
+            Picker("Màu mặc định:", selection: $settings.data.notesDefaultColor) {
+                ForEach(NoteColors.all) { c in Text(c.label).tag(c.name) }
+            }
+            .frame(width: 220)
+            Text("Mỗi ghi chú là một cửa sổ nhỏ: kéo thanh màu để di chuyển, kéo cạnh để đổi cỡ. Trên thanh có nút đổi màu, tạo mới, ghim nổi, thu gọn thành một thanh (hiện dòng đầu làm tiêu đề) và xoá. Nội dung tự lưu, mở lại khi khởi động.")
+                .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+            Button("Tạo ghi chú ngay") { EventTap.shared.notes.createNote() }
+            Spacer()
+        }
+    }
+}
+
 // MARK: - Ghi phím tắt
 
 struct HotkeyRecorder: NSViewRepresentable {
@@ -236,7 +268,26 @@ struct HotkeyRecorder: NSViewRepresentable {
 final class HotkeyRecorderView: NSButton {
     var onChange: ((Hotkey) -> Void)?
     var current: Hotkey? { didSet { refreshTitle() } }
-    private var recording = false { didSet { refreshTitle(); EventTap.shared.suspended = recording } }
+    private var recording = false {
+        didSet {
+            refreshTitle()
+            if recording {
+                // Tạm tắt ⌘⇥ gốc của macOS để ghi được tổ hợp này; bắt phím qua event tap
+                EventTap.setNativeCmdTab(enabled: false)
+                EventTap.shared.recordingHandler = { [weak self] hk in
+                    guard let self = self else { return }
+                    self.current = hk
+                    self.recording = false
+                    self.onChange?(hk)
+                }
+                if !EventTap.shared.isRunning { EventTap.shared.suspended = true }
+            } else {
+                EventTap.shared.recordingHandler = nil
+                EventTap.shared.suspended = false
+                EventTap.shared.applyNativeCmdTabPolicy()
+            }
+        }
+    }
 
     init() {
         super.init(frame: NSRect(x: 0, y: 0, width: 110, height: 24))
@@ -265,7 +316,7 @@ final class HotkeyRecorderView: NSButton {
     }
 
     override func keyDown(with event: NSEvent) {
-        guard recording else { super.keyDown(with: event); return }
+        guard recording, !EventTap.shared.isRunning else { if !recording { super.keyDown(with: event) }; return }
         if event.keyCode == 53 { recording = false; return }   // Esc: huỷ
         let hk = Hotkey(keyCode: event.keyCode, modifiers: event.modifierFlags)
         current = hk

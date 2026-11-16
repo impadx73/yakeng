@@ -32,6 +32,13 @@ final class Settings: ObservableObject {
         var vietSpellMode = "lenient"                            // "off" | "lenient" | "strict"
         var vietBrowserFix = true                                // sửa lỗi gợi ý thanh địa chỉ trình duyệt
 
+        // Ghi chú
+        var notesEnabled = true
+        var notesNewHotkey = Hotkey(keyCode: 45, modifiers: [.control, .option])      // ⌃⌥N
+        var notesToggleHotkey = Hotkey(keyCode: 4, modifiers: [.control, .option])    // ⌃⌥H
+        var notesDefaultPinned = true                            // ghi chú mới luôn nổi trên cùng
+        var notesDefaultColor = "yellow"
+
         var launchAtLogin = false
 
         init() {}
@@ -58,6 +65,11 @@ final class Settings: ObservableObject {
             vietModernTone = get(.vietModernTone, vietModernTone)
             vietSpellMode = get(.vietSpellMode, vietSpellMode)
             vietBrowserFix = get(.vietBrowserFix, vietBrowserFix)
+            notesEnabled = get(.notesEnabled, notesEnabled)
+            notesNewHotkey = get(.notesNewHotkey, notesNewHotkey)
+            notesToggleHotkey = get(.notesToggleHotkey, notesToggleHotkey)
+            notesDefaultPinned = get(.notesDefaultPinned, notesDefaultPinned)
+            notesDefaultColor = get(.notesDefaultColor, notesDefaultColor)
             launchAtLogin = get(.launchAtLogin, launchAtLogin)
         }
     }

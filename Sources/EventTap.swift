@@ -20,6 +20,12 @@ final class EventTap {
     /// Tạm dừng xử lý (khi đang ghi phím tắt trong Cài đặt).
     var suspended = false
 
+    /// Đang ghi phím tắt trong Cài đặt: phím đầu tiên (kèm bổ trợ) được chuyển cho handler và nuốt.
+    /// Bắt ở tap nên ghi được cả ⌘⇥ (ô nhập thường không bao giờ nhận được tổ hợp này).
+    var recordingHandler: ((Hotkey) -> Void)?
+
+    let notes = NotesManager()
+
     /// Bảng Alt+Tab đang (sắp) hiện – đặt ngay trên luồng tap, không chờ luồng chính.
     private var switcherActive = false
 
@@ -57,7 +63,23 @@ final class EventTap {
         thread.qualityOfService = .userInteractive
         thread.start()
         startFocusMonitor()
+        applyNativeCmdTabPolicy()
         return true
+    }
+
+    // MARK: - ⌘⇥ của macOS (Dock bắt ở tầng WindowServer, trước mọi app – cách AltTab xử lý)
+
+    /// Symbolic hotkey 1 = ⌘⇥, 2 = ⌘⇧⇥ (bộ chuyển app gốc). Trạng thái tắt/bật tồn tại cả sau khi thoát app,
+    /// nên luôn bật lại khi phím tắt đổi hoặc khi Yakeng thoát.
+    static func setNativeCmdTab(enabled: Bool) {
+        CGSSetSymbolicHotKeyEnabled(1, enabled)
+        CGSSetSymbolicHotKeyEnabled(2, enabled)
+    }
+
+    func applyNativeCmdTabPolicy() {
+        let cfg = settings.data
+        let usesCmdTab = cfg.altTabEnabled && cfg.altTabHotkey.keyCode == 48 && cfg.altTabHotkey.flags == [.command]
+        EventTap.setNativeCmdTab(enabled: !(usesCmdTab && isRunning))
     }
 
     // MARK: - Theo dõi app/ô đang focus (chạy nền, tap chỉ đọc kết quả đã cache)
@@ -135,6 +157,19 @@ final class EventTap {
         case .keyDown:
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
 
+            // Đang ghi phím tắt trong Cài đặt
+            if let handler = recordingHandler {
+                let mods = Hotkey.relevant(flags)
+                // Phím bổ trợ đơn lẻ không tính; Esc huỷ
+                if keyCode == 53 { recordingHandler = nil; return nil }
+                if ![54, 55, 56, 57, 58, 59, 60, 61, 62, 63].contains(keyCode) {
+                    recordingHandler = nil
+                    let hk = Hotkey(keyCode: UInt16(keyCode), modifiers: mods)
+                    DispatchQueue.main.async { handler(hk) }
+                }
+                return nil
+            }
+
             // Bật/tắt tiếng Việt
             if cfg.vietEnabled, cfg.vietToggleHotkey.matches(keyCode: keyCode, flags: flags) {
                 viet.reset()
@@ -150,6 +185,18 @@ final class EventTap {
                 viet.reset()
                 DispatchQueue.main.async { self.clipboard.togglePanel() }
                 return nil
+            }
+
+            // Ghi chú
+            if cfg.notesEnabled {
+                if cfg.notesNewHotkey.matches(keyCode: keyCode, flags: flags) {
+                    DispatchQueue.main.async { self.notes.createNote() }
+                    return nil
+                }
+                if cfg.notesToggleHotkey.matches(keyCode: keyCode, flags: flags) {
+                    DispatchQueue.main.async { self.notes.toggleAll() }
+                    return nil
+                }
             }
 
             // Alt + Tab
@@ -268,6 +315,9 @@ final class EventTap {
     /// Bundle ID của app đang ở trước (đã cache, không gọi NSWorkspace trong tap).
     static var frontmostBundleID: String { shared.frontBundleID }
 }
+
+@_silgen_name("CGSSetSymbolicHotKeyEnabled") @discardableResult
+func CGSSetSymbolicHotKeyEnabled(_ hotKey: Int32, _ enabled: Bool) -> Int32
 
 private func yakengTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     return EventTap.shared.handle(proxy: proxy, type: type, event: event)

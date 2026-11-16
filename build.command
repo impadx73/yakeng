@@ -13,7 +13,7 @@ fi
 
 APP="Yakeng.app"
 DMG="Yakeng.dmg"
-VERSION="2.13"
+VERSION="2.14"
 OUT="$PWD"
 pkill -x Yakeng 2>/dev/null || true
 sleep 0.5
