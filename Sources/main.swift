@@ -19,9 +19,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if Settings.shared.data.notesEnabled { tap.notes.restore() }
         // Đổi phím tắt trong Cài đặt → cập nhật việc tắt/bật ⌘⇥ gốc của macOS
         settingsSink = Settings.shared.$data
-            .map { ($0.altTabEnabled, $0.altTabHotkey) }
-            .removeDuplicates(by: { $0.0 == $1.0 && $0.1 == $1.1 })
-            .sink { [weak self] _ in self?.tap.applyNativeCmdTabPolicy() }
+            .map { (cfg: Settings.Config) -> String in "\(cfg.altTabEnabled)|\(cfg.altTabHotkey.keyCode)|\(cfg.altTabHotkey.modifiers)" }
+            .removeDuplicates()
+            .sink { [weak self] (_: String) in self?.tap.applyNativeCmdTabPolicy() }
         startSecureInputMonitor()
 
         // Quyền Accessibility
