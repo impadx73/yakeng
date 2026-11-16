@@ -12,7 +12,7 @@ Bộ công cụ bàn phím "kiểu Windows" cho macOS, chạy nền trên thanh 
 
 ## Tải về (không cần build)
 
-**[Tải Yakeng.dmg](https://github.com/impadx73/yakeng/raw/main/dist/Yakeng.dmg)** – bản 2.16, Apple Silicon, macOS 12+.
+**[Tải Yakeng.dmg](https://github.com/impadx73/yakeng/raw/main/dist/Yakeng.dmg)** – bản 2.17, Apple Silicon, macOS 12+.
 
 1. Mở `Yakeng.dmg`, kéo **Yakeng** vào **Applications**.
 2. Lần đầu mở: nhấp chuột phải vào app → **Open** (app ký bằng chứng chỉ tự tạo, chưa notarize).

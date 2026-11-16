@@ -139,7 +139,7 @@ struct GeneralTab: View {
                 .padding(6)
             }
             Spacer()
-            Text("Yakeng 2.16 – mã nguồn: github.com/impadx73/yakeng")
+            Text("Yakeng 2.17 – mã nguồn: github.com/impadx73/yakeng")
                 .font(.caption).foregroundColor(.secondary)
         }
     }

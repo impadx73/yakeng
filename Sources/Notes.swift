@@ -204,6 +204,33 @@ final class NoteWindow: NSPanel, NSWindowDelegate {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
+    /// Yakeng là app thanh menu (không có menu Sửa) và ghi chú là panel không kích hoạt app,
+    /// nên ⌘V/⌘C/⌘X/⌘A/⌘Z phải tự chuyển cho ô đang gõ (nội dung hoặc tiêu đề).
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard event.type == .keyDown, flags.contains(.command),
+              !flags.contains(.control), !flags.contains(.option),
+              let responder = firstResponder else {
+            return super.performKeyEquivalent(with: event)
+        }
+        let shift = flags.contains(.shift)
+        var action: Selector?
+        switch event.keyCode {
+        case 9:  action = shift ? #selector(NSTextView.pasteAsPlainText(_:)) : #selector(NSText.paste(_:))   // V
+        case 8:  action = #selector(NSText.copy(_:))        // C
+        case 7:  action = #selector(NSText.cut(_:))         // X
+        case 0:  action = #selector(NSText.selectAll(_:))   // A
+        case 6:                                             // Z / ⇧Z
+            if let um = responder.undoManager {
+                if shift { if um.canRedo { um.redo() } } else if um.canUndo { um.undo() }
+                return true
+            }
+        default: break
+        }
+        if let a = action, responder.tryToPerform(a, with: self) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+
     init(note: Note, manager: NotesManager) {
         self.noteID = note.id
         self.manager = manager
